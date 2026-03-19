@@ -236,5 +236,9 @@ def carve_hollow_shell_strict(
             print(f"[CARVE] removed {before_cleanup - after_cleanup} voxels from tiny residual components")
 
     stats["end_voxels"] = int(carved.sum())
+    stats["reduction_ratio"] = (
+        0.0 if stats["start_voxels"] == 0
+        else 1.0 - stats["end_voxels"] / stats["start_voxels"]
+    )
 
     return carved, stats
