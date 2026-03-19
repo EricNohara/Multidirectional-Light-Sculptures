@@ -85,7 +85,7 @@ Place silhouette images inside the inputs folder and configure their paths insid
 Run this command from the root of the project:
 
 ```bash
-py src/run_pipeline.py
+py src/run_pipeline.py inputs/view0.png inputs/view1.png --grid 256 --image-size 256 --optimize-material
 ```
 
 ## Pipeline Stages
