@@ -1,12 +1,25 @@
 # Multidirectional Light Sculptures
 
-## Eric Nohara-LeClair, ...
+## Eric Nohara-LeClair, Sophie, Josh
 
-This code takes as input one or more reference silhouette images and generates a 3D printable voxel sculpture who's orthographic shadows match the inputs'. The pipeline creates the initial shadow hull, optimizes the input silhouettes to reduce inconsistencies to reduce missing parts of the silhouettes, then hollows out the interior of the sculpture to reduce the materials used to print it.
+The multidirectional light sculpture generation pipeline takes as input one or more reference silhouette images and generates a 3D printable voxel sculpture who's orthographic shadows match the inputs'. The pipeline creates the initial shadow hull, optimizes the input silhouettes to reduce inconsistencies to reduce missing parts of the silhouettes, then hollows out the interior of the sculpture to reduce the materials used to print it.
+
+## Table of Contents
+
+- [Features](#features)
+- [Repository Structure](#repository-structure)
+- [Requirements](#requirements)
+- [Input Silhouettes](#input-silhouettes)
+- [Running the Pipeline](#running-the-pipeline)
+- [Pipeline Stages](#pipeline-stages)
+- [Important Parameters](#important-parameters)
+- [Output Files](#output-files)
+- [Known Limitations](#known-limitations)
+- [Future Improvements](#future-improvements)
 
 ## Features
 
-- Multi view shadow hull construction
+- Shadow hull construction from multiple input silhouettes
 - Iterative silhouette optimization to reduce missing shadow regions
 - Fast greedy carving using per pixel support counts
 - Hollow shell generation for material reduction
@@ -22,9 +35,10 @@ C:.
 │   README.md
 │
 ├───inputs
-│       view0.png
-│       view1.png
-│       view4.png
+│       views.png
+│
+├───renders
+│       renders.png
 │
 ├───outputs
 │   ├───debug
@@ -71,14 +85,12 @@ pip install numpy scipy tqdm trimesh pillow scikit-image
 
 ## Input Silhouettes
 
-Silhouettes must satisfy the following:
+Input silhouettes must be binary images where:
 
-- Binary images
 - White pixels represent required shadow coverage
 - Black pixels represent empty shadow
-- All views must have the same image resolution
 
-Place silhouette images inside the inputs folder and configure their paths inside `run_pipeline.py`.
+Put silhouette images inside /inputs and input their paths on the command line when running the pipeline.
 
 ## Running the Pipeline
 
@@ -88,18 +100,21 @@ Run this command from the root of the project:
 py src/run_pipeline.py inputs/view0.png inputs/view1.png --grid 256 --image-size 256 --optimize-material
 ```
 
+- The `--grid, --image-size, --optimize-material` flags are optional.
+- You may input 1 - 3 input silhouette images.
+
 ## Pipeline Stages
 
 1. Reset output folders
-2. Load binary silhouette images
+2. Load binary silhouette images as binary matrices
 3. Configure shadow sources and light directions
 4. Compute conservative shadow hull
-5. Simulate hull shadows and compute IoU metrics
-6. Optimize silhouettes to reduce inconsistent shadow pixels
-7. Recompute improved shadow hull
-8. Hollow interior voxels while preserving outer shell
-9. Export meshes
-10. Save simulated shadow renders and debug slices
+5. Simulate hull shadows from step 4
+6. Optimize silhouettes to reduce inconsistent shadow pixels between silhouettes (e.g. if the shapes of the silhouettes are inconsistent)
+7. Recompute shadow hull with optimized silhouettes from part 6
+8. Hollow out the sculpture if optimizing materials
+9. Export meshes as stl files
+10. Save simulated shadow renders and debug slices to output
 
 ## Important Parameters
 
@@ -114,7 +129,7 @@ Inside `run_pipeline.py`:
 - `max_passes` controls carving aggressiveness
 - shell thickness parameters control material optimization
 
-Higher voxel resolution improves shadow accuracy but increases runtime and memory usage significantly.
+Higher voxel resolution improves shadow accuracy but increases runtime and memory usage.
 
 ## Output Files
 
@@ -124,23 +139,21 @@ The pipeline generates:
 - `outputs/meshes/shadow_carved.stl`
 - Shadow simulation images per view
 - Debug voxel slice images
-- Console metrics including IoU, missing pixels, and reduction ratios
+- Metrics printed to the terminal
 
 ## Known Limitations
 
-- Some silhouette combinations are geometrically incompatible
+- Some silhouette combinations are geometrically incompatible and will lead to many missed pixels in the silhouette
 - Thin structures may disappear at low voxel resolution
-- Hollowing may create disconnected internal artifacts without connectivity constraints
-- Mesh surfaces are voxelized and may require smoothing
-- Orthographic lighting model only
-- Runtime increases quickly with grid resolution
+- Hollowing doesn't seem to affect print time or material
+- Mesh surfaces are voxelized and require smoothing (sanding or computationally)
+- Orthographic lighting model only (assumes parallel light rays)
+- Runtime increases with grid resolution
 
 ## Future Improvements
 
-- Connectivity preserving carving
-- Signed distance shell generation
-- Adaptive voxel grids
+- Better connectivity preserving carving
+- Automatically adaptive voxel grids
 - GPU acceleration
-- Mesh decimation and smoothing
-- Support for more than two silhouettes
+- Mesh smoothing
 - Automatic light placement optimization
