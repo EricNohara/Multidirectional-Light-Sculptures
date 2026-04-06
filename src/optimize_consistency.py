@@ -1,8 +1,10 @@
+import os
 import numpy as np
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from scipy.ndimage import binary_erosion, binary_dilation, binary_closing
 
-from shadow_hull import compute_shadow_hull
+from shadow_hull import compute_raw_shadow_hull
 from render import render_shadow
 from projections import project_points_orthographic
 from warp import smooth_displacement, warp_mask
@@ -28,48 +30,56 @@ def nearest_boundary_point_from_list(boundary_pts: np.ndarray, target_xy):
     return boundary_pts[np.argmin(d2)]
 
 
-def precompute_source_projection_data(sources, voxel_centers):
+def _precompute_one_source_projection(src, pts):
+    px, py, valid, depth = project_points_orthographic(
+        pts,
+        src.direction,
+        src.up,
+        src.world_center,
+        src.world_size,
+        src.image.shape
+    )
+
+    pxi = np.round(px).astype(int)
+    pyi = np.round(py).astype(int)
+
+    ray_lookup = {}
+    valid_idxs = np.where(valid)[0]
+
+    for idx in valid_idxs:
+        key = (pxi[idx], pyi[idx])
+        if key not in ray_lookup:
+            ray_lookup[key] = []
+        ray_lookup[key].append(idx)
+
+    for key in ray_lookup:
+        arr = np.array(ray_lookup[key], dtype=int)
+        arr = arr[np.argsort(depth[arr])]
+        ray_lookup[key] = arr
+
+    return {
+        "px": pxi,
+        "py": pyi,
+        "valid": valid,
+        "depth": depth,
+        "ray_lookup": ray_lookup,
+    }
+
+
+def precompute_source_projection_data(sources, voxel_centers, num_workers=None):
     """
     Project all voxel centers into every source once and build a lookup:
       (pixel_x, pixel_y) -> voxel indices along that ray, sorted by depth.
+    Parallelized over sources.
     """
     pts = voxel_centers.reshape(-1, 3)
-    proj_data = []
 
-    for src in sources:
-        px, py, valid, depth = project_points_orthographic(
-            pts,
-            src.direction,
-            src.up,
-            src.world_center,
-            src.world_size,
-            src.image.shape
-        )
+    if num_workers is None:
+        num_workers = min(len(sources), max(1, os.cpu_count() or 1))
 
-        pxi = np.round(px).astype(int)
-        pyi = np.round(py).astype(int)
-
-        ray_lookup = {}
-        valid_idxs = np.where(valid)[0]
-
-        for idx in valid_idxs:
-            key = (pxi[idx], pyi[idx])
-            if key not in ray_lookup:
-                ray_lookup[key] = []
-            ray_lookup[key].append(idx)
-
-        for key in ray_lookup:
-            arr = np.array(ray_lookup[key], dtype=int)
-            arr = arr[np.argsort(depth[arr])]
-            ray_lookup[key] = arr
-
-        proj_data.append({
-            "px": pxi,
-            "py": pyi,
-            "valid": valid,
-            "depth": depth,
-            "ray_lookup": ray_lookup,
-        })
+    with ThreadPoolExecutor(max_workers=num_workers) as ex:
+        futures = [ex.submit(_precompute_one_source_projection, src, pts) for src in sources]
+        proj_data = [f.result() for f in futures]
 
     return pts, proj_data
 
@@ -112,7 +122,6 @@ def find_least_cost_voxel_for_inconsistent_pixel_fast(
         return None
 
     if max_ray_samples is not None and len(idxs) > max_ray_samples:
-        # sample uniformly along the sorted depth list
         sample_ids = np.linspace(0, len(idxs) - 1, max_ray_samples).astype(int)
         idxs = idxs[sample_ids]
 
@@ -145,87 +154,161 @@ def project_point_to_image_fast(point_idx, src, pd):
     return np.array([x, y], dtype=int)
 
 
+def _precompute_view_data(src, hull, voxel_centers):
+    actual = render_shadow(hull, voxel_centers, src)
+    inc = inconsistent_pixels(src.image, actual)
+    outside = outside_distance(src.image)
+    boundary = boundary_pixels(src.image)
+    return actual, inc, outside, boundary
+
+
+def _build_constraints_for_view(
+    j,
+    inc,
+    sample_per_view,
+    max_ray_samples,
+    sources,
+    outside_cost_maps,
+    boundary_pts_list,
+    proj_data,
+    verbose,
+):
+    local_dx_list = [np.zeros_like(s.image, dtype=float) for s in sources]
+    local_dy_list = [np.zeros_like(s.image, dtype=float) for s in sources]
+    local_add_maps = [np.zeros_like(s.image, dtype=bool) for s in sources]
+
+    ys, xs = np.where(inc)
+
+    if len(xs) == 0:
+        return j, local_dx_list, local_dy_list, local_add_maps, 0
+
+    candidate_ids = np.arange(len(xs))
+    if len(candidate_ids) > sample_per_view:
+        candidate_ids = np.random.choice(candidate_ids, size=sample_per_view, replace=False)
+
+    # No tqdm here: this function runs in worker threads.
+    for t in candidate_ids:
+        px = int(xs[t])
+        py = int(ys[t])
+
+        result = find_least_cost_voxel_for_inconsistent_pixel_fast(
+            source_index=j,
+            pixel_xy=(px, py),
+            sources=sources,
+            outside_cost_maps=outside_cost_maps,
+            proj_data=proj_data,
+            max_ray_samples=max_ray_samples,
+        )
+
+        if result is None:
+            continue
+
+        point_idx, _ = result
+
+        for k, src in enumerate(sources):
+            if k == j:
+                continue
+
+            q = project_point_to_image_fast(point_idx, src, proj_data[k])
+            if q is None:
+                continue
+
+            qx, qy = int(q[0]), int(q[1])
+
+            local_add_maps[k][qy, qx] = True
+
+            b = nearest_boundary_point_from_list(boundary_pts_list[k], q)
+            if b is not None:
+                bx, by = int(b[0]), int(b[1])
+                local_dx_list[k][by, bx] += (qx - bx)
+                local_dy_list[k][by, bx] += (qy - by)
+
+    return j, local_dx_list, local_dy_list, local_add_maps, int(len(xs))
+
+
 def build_displacement_constraints(
     sources,
     voxel_centers,
     sample_per_view=300,
     max_ray_samples=24,
-    verbose=True
+    verbose=True,
+    num_workers=None,
 ):
     """
-    Returns:
-      dx_list, dy_list, add_maps, actuals, inconsistencies, stats
+    Returns: dx_list, dy_list, add_maps, actuals, inconsistencies, stats
+
+    Parallelized over:
+    - source projection precompute
+    - per-view render/precompute
+    - per-view constraint construction
     """
-    hull = compute_shadow_hull(sources, voxel_centers)
-    actuals = [render_shadow(hull, voxel_centers, s) for s in sources]
-    inconsistencies = [inconsistent_pixels(s.image, a) for s, a in zip(sources, actuals)]
-    outside_cost_maps = [outside_distance(s.image) for s in sources]
-    boundary_pts_list = [boundary_pixels(s.image) for s in sources]
+    hull = compute_raw_shadow_hull(sources, voxel_centers)
+
+    if num_workers is None:
+        num_workers = min(len(sources), max(1, os.cpu_count() or 1))
+
+    with ThreadPoolExecutor(max_workers=num_workers) as ex:
+        futures = [ex.submit(_precompute_view_data, src, hull, voxel_centers) for src in sources]
+
+        precomputed = []
+        iterator = as_completed(futures)
+        if verbose:
+            iterator = tqdm(iterator, total=len(futures), desc="[PRECOMPUTE VIEWS]", unit="view")
+
+        for f in iterator:
+            precomputed.append(f.result())
+
+    actuals = [x[0] for x in precomputed]
+    inconsistencies = [x[1] for x in precomputed]
+    outside_cost_maps = [x[2] for x in precomputed]
+    boundary_pts_list = [x[3] for x in precomputed]
 
     dx_list = [np.zeros_like(s.image, dtype=float) for s in sources]
     dy_list = [np.zeros_like(s.image, dtype=float) for s in sources]
     add_maps = [np.zeros_like(s.image, dtype=bool) for s in sources]
 
-    _, proj_data = precompute_source_projection_data(sources, voxel_centers)
+    _, proj_data = precompute_source_projection_data(
+        sources,
+        voxel_centers,
+        num_workers=num_workers
+    )
 
-    total_missing = 0
+    total_missing = sum(int(inc.sum()) for inc in inconsistencies)
 
-    for j, inc in enumerate(inconsistencies):
-        ys, xs = np.where(inc)
-        total_missing += len(xs)
+    jobs = [
+        (
+            j,
+            inconsistencies[j],
+            sample_per_view,
+            max_ray_samples,
+            sources,
+            outside_cost_maps,
+            boundary_pts_list,
+            proj_data,
+            verbose
+        )
+        for j in range(len(sources))
+    ]
 
-        if len(xs) == 0:
-            continue
+    results = []
+    with ThreadPoolExecutor(max_workers=num_workers) as ex:
+        futures = [ex.submit(_build_constraints_for_view, *args) for args in jobs]
 
-        candidate_ids = np.arange(len(xs))
-        if len(candidate_ids) > sample_per_view:
-            candidate_ids = np.random.choice(candidate_ids, size=sample_per_view, replace=False)
-
-        iterator = candidate_ids
+        iterator = as_completed(futures)
         if verbose:
-            iterator = tqdm(
-                candidate_ids,
-                desc=f"[OPT] view {j} constraints",
-                unit="px"
-            )
+            iterator = tqdm(iterator, total=len(futures), desc="[CONSTRAINT BUILD]", unit="view")
 
-        for t in iterator:
-            px = int(xs[t])
-            py = int(ys[t])
+        for f in iterator:
+            results.append(f.result())
 
-            result = find_least_cost_voxel_for_inconsistent_pixel_fast(
-                source_index=j,
-                pixel_xy=(px, py),
-                sources=sources,
-                outside_cost_maps=outside_cost_maps,
-                proj_data=proj_data,
-                max_ray_samples=max_ray_samples,
-            )
+    # Sort by original view index so downstream ordering is deterministic
+    results.sort(key=lambda x: x[0])
 
-            if result is None:
-                continue
-
-            point_idx, _ = result
-
-            for k, src in enumerate(sources):
-                if k == j:
-                    continue
-
-                q = project_point_to_image_fast(point_idx, src, proj_data[k])
-                if q is None:
-                    continue
-
-                qx, qy = int(q[0]), int(q[1])
-
-                # discrete growth suggestion
-                add_maps[k][qy, qx] = True
-
-                # optional smooth boundary pull
-                b = nearest_boundary_point_from_list(boundary_pts_list[k], q)
-                if b is not None:
-                    bx, by = int(b[0]), int(b[1])
-                    dx_list[k][by, bx] += (qx - bx)
-                    dy_list[k][by, bx] += (qy - by)
+    for _, local_dx_list, local_dy_list, local_add_maps, _ in results:
+        for k in range(len(sources)):
+            dx_list[k] += local_dx_list[k]
+            dy_list[k] += local_dy_list[k]
+            add_maps[k] |= local_add_maps[k]
 
     stats = {
         "total_missing": int(total_missing),
@@ -234,6 +317,52 @@ def build_displacement_constraints(
     }
 
     return dx_list, dy_list, add_maps, actuals, inconsistencies, stats
+
+
+def _update_one_source(
+    idx,
+    src,
+    dx,
+    dy,
+    add_map,
+    alpha,
+    sigma,
+    growth_structure,
+    cleanup_structure,
+    fallback_structure,
+    worst_view,
+    growth_pixels_per_view,
+    fallback_growth_threshold,
+    fallback_global_dilation,
+    stall_count,
+):
+    dx_s, dy_s = smooth_displacement(dx, dy, sigma=sigma)
+
+    warped = warp_mask(
+        src.image,
+        dx=alpha * dx_s,
+        dy=alpha * dy_s
+    )
+
+    grown = binary_dilation(add_map, structure=growth_structure)
+
+    new_img = src.image | warped | grown
+
+    if idx == worst_view and growth_pixels_per_view[idx] < fallback_growth_threshold:
+        new_img = binary_dilation(new_img, structure=fallback_structure)
+
+    if fallback_global_dilation and stall_count >= 1 and idx == worst_view:
+        new_img = binary_dilation(new_img, structure=fallback_structure)
+
+    new_img = binary_closing(new_img, structure=cleanup_structure)
+
+    return type(src)(
+        image=new_img,
+        direction=src.direction,
+        up=src.up,
+        world_center=src.world_center,
+        world_size=src.world_size
+    )
 
 
 def optimize_silhouettes(
@@ -249,25 +378,20 @@ def optimize_silhouettes(
     fallback_growth_threshold=5,
     fallback_global_dilation=True,
     save_debug_masks=True,
-    verbose=True
+    verbose=True,
+    num_workers=None,
 ):
     """
     Iteratively deform silhouettes to reduce inconsistency.
-
-    Strategy:
-    - build hull from current silhouettes
-    - detect missing pixels
-    - infer target growth locations in the other silhouettes
-    - combine:
-        * smooth warp from sparse displacement field
-        * discrete growth from add_maps
-        * fallback dilation when progress stalls or growth is too weak
-    - keep best result and early stop on plateau
+    Same algorithm, but parallelized where the work is naturally independent.
     """
     current_sources = list(sources)
     best_sources = list(sources)
     best_missing = float("inf")
     stall_count = 0
+
+    if num_workers is None:
+        num_workers = min(len(sources), max(1, os.cpu_count() or 1))
 
     growth_structure = np.ones((2 * growth_radius + 1, 2 * growth_radius + 1), dtype=bool)
     cleanup_structure = np.ones((3, 3), dtype=bool)
@@ -275,14 +399,15 @@ def optimize_silhouettes(
 
     for it in range(iterations):
         if verbose:
-            print(f"\n[OPT] iteration {it+1}/{iterations}")
+            print(f"\n[SILHOUETTE OPTIMIZER] iteration {it+1}/{iterations}")
 
         dx_list, dy_list, add_maps, actuals, inconsistencies, stats = build_displacement_constraints(
             current_sources,
             voxel_centers,
             sample_per_view=sample_per_view,
             max_ray_samples=max_ray_samples,
-            verbose=verbose
+            verbose=verbose,
+            num_workers=num_workers,
         )
 
         total_missing = stats["total_missing"]
@@ -291,8 +416,8 @@ def optimize_silhouettes(
         worst_view = int(np.argmax(missing_per_view)) if len(missing_per_view) > 0 else 0
 
         if verbose:
-            print(f"[OPT] growth pixels per view: {growth_pixels_per_view}")
-            print(f"[OPT] iter {it+1}: missing={total_missing}, per_view={missing_per_view}")
+            print(f"[SILHOUETTE OPTIMIZER] growth pixels per view: {growth_pixels_per_view}")
+            print(f"[SILHOUETTE OPTIMIZER] iter {it+1}: missing={total_missing}, per_view={missing_per_view}")
 
         if total_missing < best_missing:
             best_missing = total_missing
@@ -303,46 +428,40 @@ def optimize_silhouettes(
 
         if total_missing == 0:
             if verbose:
-                print("[OPT] perfect consistency reached")
+                print("[SILHOUETTE OPTIMIZER] perfect consistency reached")
             break
 
-        updated_sources = []
-
-        for idx, (src, dx, dy, add_map) in enumerate(zip(current_sources, dx_list, dy_list, add_maps)):
-            # smooth sparse displacement field
-            dx_s, dy_s = smooth_displacement(dx, dy, sigma=sigma)
-
-            # continuous warp
-            warped = warp_mask(
-                src.image,
-                dx=alpha * dx_s,
-                dy=alpha * dy_s
+        jobs = [
+            (
+                idx,
+                src,
+                dx,
+                dy,
+                add_map,
+                alpha,
+                sigma,
+                growth_structure,
+                cleanup_structure,
+                fallback_structure,
+                worst_view,
+                growth_pixels_per_view,
+                fallback_growth_threshold,
+                fallback_global_dilation,
+                stall_count,
             )
+            for idx, (src, dx, dy, add_map) in enumerate(zip(current_sources, dx_list, dy_list, add_maps))
+        ]
 
-            # discrete growth proposed by least-cost-voxel constraints
-            grown = binary_dilation(add_map, structure=growth_structure)
+        with ThreadPoolExecutor(max_workers=num_workers) as ex:
+            futures = [ex.submit(_update_one_source, *args) for args in jobs]
 
-            # combine old shape + warp + targeted growth
-            new_img = src.image | warped | grown
+            updated_sources = []
+            iterator = as_completed(futures)
+            if verbose:
+                iterator = tqdm(iterator, total=len(futures), desc="[UPDATE SILHOUETTES]", unit="view")
 
-            # fallback: if growth suggestions are too weak, help the worst-view silhouette expand a bit
-            if idx == worst_view and growth_pixels_per_view[idx] < fallback_growth_threshold:
-                new_img = binary_dilation(new_img, structure=fallback_structure)
-
-            # fallback on plateau: if stalled, allow a tiny additional dilation on the worst view
-            if fallback_global_dilation and stall_count >= 1 and idx == worst_view:
-                new_img = binary_dilation(new_img, structure=fallback_structure)
-
-            # cleanup
-            new_img = binary_closing(new_img, structure=cleanup_structure)
-
-            updated_sources.append(type(src)(
-                image=new_img,
-                direction=src.direction,
-                up=src.up,
-                world_center=src.world_center,
-                world_size=src.world_size
-            ))
+            for f in iterator:
+                updated_sources.append(f.result())
 
         current_sources = updated_sources
 
@@ -355,11 +474,10 @@ def optimize_silhouettes(
 
         if stall_count >= plateau_patience:
             if verbose:
-                print("[OPT] early stop: no improvement")
+                print("[SILHOUETTE OPTIMIZER] early stop: no improvement")
             break
 
-    # evaluate the final best silhouettes one last time if you want best-by-metric behavior
     if verbose:
-        print(f"[OPT] best total missing: {best_missing}")
+        print(f"[SILHOUETTE OPTIMIZER] best total missing: {best_missing}")
 
     return best_sources

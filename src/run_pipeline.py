@@ -11,7 +11,7 @@ from simulate import simulate_and_save
 from debug_slices import save_voxel_slices
 from optimize_consistency import optimize_silhouettes
 from reset_output import reset_output_dirs
-
+import time
 
 # helper function to print out metrics per silhouette input view
 def print_view_metrics(name, summaries):
@@ -114,6 +114,7 @@ def build_sources(images, world_size):
 def main():
     # parse command line args
     args = parse_args()
+    t0 = time.time()
 
     # world and image parameters
     world_size = args.world_size
@@ -122,6 +123,7 @@ def main():
     optimize_material = args.optimize_material
 
     # reset the output directory for new run
+    print("[PIPELINE] resetting output folders")
     reset_output_dirs()
 
     # load silhouettes from command line
@@ -228,6 +230,7 @@ def main():
         except Exception as e:
             print("[ERROR] carved export failed:", e)
 
+    print(f"[PIPELINE] runtime: {time.time() - t0:.2f} seconds")
 
 if __name__ == "__main__":
     main()
