@@ -150,12 +150,15 @@ def main():
     optimized_sources = optimize_silhouettes(
         sources,
         voxel_centers,
-        iterations=6,
-        alpha=0.15,
-        sigma=4.0,
-        sample_per_view=300,
-        growth_radius=2,
-        verbose=True
+        iterations=30,
+        sample_per_view=500,
+        max_ray_samples=16,
+        step_fraction=0.3,
+        mesh_spacing=10,
+        deformation_tolerance=0.08,
+        plateau_patience=3,
+        save_debug_masks=True,
+        verbose=True,
     )
 
     # save optimized silhouettes for debug
