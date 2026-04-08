@@ -1,6 +1,6 @@
 # Multidirectional Light Sculptures
 
-## Eric Nohara-LeClair, Sophie, Josh
+## Eric Nohara-LeClair, Yingtong (Sophie) Shen, Josh
 
 The multidirectional light sculpture generation pipeline takes as input one or more reference silhouette images and generates a 3D printable voxel sculpture who's orthographic shadows match the inputs'. The pipeline creates the initial shadow hull, optimizes the input silhouettes to reduce inconsistencies to reduce missing parts of the silhouettes, then hollows out the interior of the sculpture to reduce the materials used to print it.
 
