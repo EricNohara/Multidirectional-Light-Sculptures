@@ -11,7 +11,8 @@ from simulate import simulate_and_save
 from debug_slices import save_voxel_slices
 from optimize_consistency import optimize_silhouettes
 from reset_output import reset_output_dirs
-
+from postprocess_prune import fast_projection_prune
+import time
 
 # helper function to print out metrics per silhouette input view
 def print_view_metrics(name, summaries):
@@ -121,6 +122,8 @@ def main():
     image_size = (args.image_size, args.image_size)
     optimize_material = args.optimize_material
 
+    t0 = time.time()
+
     # reset the output directory for new run
     reset_output_dirs()
 
@@ -137,6 +140,7 @@ def main():
 
     # define the shadow sources, one per image
     sources = build_sources(images, world_size)
+    original_sources = sources
 
     # print the shadow sources for debug
     for i, src in enumerate(sources):
@@ -167,6 +171,24 @@ def main():
     hull = compute_shadow_hull(sources, voxel_centers)
     print("[PIPELINE] initial hull voxel count:", int(hull.sum()))
     print("[PIPELINE] initial hull occupancy ratio:", float(hull.mean()))
+
+    # 1.5) strict connected pruning
+    hull, post_stats = fast_projection_prune(
+        hull,
+        voxel_centers,
+        optimized_sources=optimized_sources,
+        original_sources=original_sources,
+        max_passes=6,
+        max_remove_fraction_per_pass=0.15,
+        min_face_neighbors=2,
+        redundancy_threshold=2.0,
+        cleanup_each_pass=True,
+        verbose=True,
+    )
+
+    print("[PIPELINE] fast prune bulk removed:", post_stats["bulk_removed"])
+    print("[PIPELINE] fast prune cc removed:", post_stats["cc_removed"])
+    print("[PIPELINE] fast prune final hull voxel count:", post_stats["final_voxels"])
 
     # simulate the shadows and save to debug
     hull_summaries = simulate_and_save(
@@ -227,6 +249,8 @@ def main():
             print("[PIPELINE] saved carved mesh: outputs/meshes/shadow_carved.stl")
         except Exception as e:
             print("[ERROR] carved export failed:", e)
+
+    print(f"[PIPELINE] completed in {time.time() - t0} seconds")
 
 
 if __name__ == "__main__":
