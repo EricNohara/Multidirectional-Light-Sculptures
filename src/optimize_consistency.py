@@ -7,7 +7,6 @@ from render import render_shadow
 from projections import project_points_orthographic
 from warp import smooth_displacement, warp_mask
 from distances import outside_distance
-from image_io import save_mask
 
 
 def inconsistent_pixels(desired: np.ndarray, actual: np.ndarray) -> np.ndarray:
@@ -248,7 +247,6 @@ def optimize_silhouettes(
     plateau_patience=2,
     fallback_growth_threshold=5,
     fallback_global_dilation=True,
-    save_debug_masks=True,
     verbose=True
 ):
     """
@@ -345,13 +343,6 @@ def optimize_silhouettes(
             ))
 
         current_sources = updated_sources
-
-        if save_debug_masks:
-            for idx, s in enumerate(current_sources):
-                save_mask(s.image, f"outputs/debug/opt_iterations/opt_iter_{it+1}_view{idx}.png")
-                save_mask(actuals[idx], f"outputs/debug/opt_iterations/opt_iter_{it+1}_view{idx}_actual.png")
-                save_mask(inconsistencies[idx], f"outputs/debug/opt_iterations/opt_iter_{it+1}_view{idx}_missing.png")
-                save_mask(add_maps[idx], f"outputs/debug/opt_iterations/opt_iter_{it+1}_view{idx}_growth.png")
 
         if stall_count >= plateau_patience:
             if verbose:

@@ -134,7 +134,7 @@ if run_clicked:
 
             st.subheader("4. Output previews")
 
-            sim_dir = Path("outputs/sim")
+            sim_dir = Path(result["output_dir"]) / "sim"
             if sim_dir.exists:
                 sim_images = list(sim_dir.glob("*.png"))
 

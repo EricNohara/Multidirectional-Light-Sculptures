@@ -10,8 +10,9 @@ from carve import carve_hollow_shell_strict
 from simulate import simulate_and_save
 from debug_slices import save_voxel_slices
 from optimize_consistency import optimize_silhouettes
-from reset_output import reset_output_dirs
 from postprocess_prune import fast_projection_prune
+from pathlib import Path
+from datetime import datetime
 import time
 
 # helper function to print out metrics per silhouette input view
@@ -27,6 +28,11 @@ def print_view_metrics(name, summaries):
             f"extra={m['extra_pixels']}"
         )
 
+def make_run_output_dir(base_dir="outputs"):
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output_dir = Path(base_dir) / f"run_{timestamp}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -118,11 +124,28 @@ def run_pipeline(
     grid=350,
     image_size_value=350,
     optimize_material=False,
+    output_dir=None,
     log=print,
 ):
     t0 = time.time()
 
-    reset_output_dirs()
+    if output_dir is None:
+        output_dir = make_run_output_dir()
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    debug_dir = output_dir / "debug"
+    sim_dir = output_dir / "sim"
+    mesh_dir = output_dir / "meshes"
+
+    (debug_dir / "masks" / "base").mkdir(parents=True, exist_ok=True)
+    (debug_dir / "masks" / "opt").mkdir(parents=True, exist_ok=True)
+    (debug_dir / "slices").mkdir(parents=True, exist_ok=True)
+    sim_dir.mkdir(parents=True, exist_ok=True)
+    mesh_dir.mkdir(parents=True, exist_ok=True)
+
+    log(f"[PIPELINE] output directory: {output_dir}")
 
     nx = ny = nz = grid
     image_size = (image_size_value, image_size_value)
@@ -134,7 +157,7 @@ def run_pipeline(
         log(f"[PIPELINE] img{i} silhouette pixels: {img.sum()} of {img.size}")
 
     for i, img in enumerate(images):
-        save_mask(img, f"outputs/debug/masks/base/view{i}_mask.png")
+        save_mask(img, str(debug_dir / "masks" / "base" / f"view{i}_mask.png"))
 
     sources = build_sources(images, world_size)
     original_sources = sources
@@ -157,7 +180,7 @@ def run_pipeline(
     )
 
     for i, src in enumerate(optimized_sources):
-        save_mask(src.image, f"outputs/debug/masks/opt/view{i}_optimized_mask.png")
+        save_mask(src.image, str(debug_dir / "masks" / "opt" / f"view{i}_optimized_mask.png"))
 
     sources = optimized_sources
 
@@ -190,13 +213,13 @@ def run_pipeline(
         hull,
         voxel_centers,
         sources,
-        out_dir="outputs/sim",
+        out_dir=str(sim_dir),
         prefix="hull",
     )
 
     pitch = voxel_pitch(world_size, nx, ny, nz)
 
-    hull_stl_path = "outputs/meshes/shadow_hull.stl"
+    hull_stl_path = str(mesh_dir / "shadow_hull.stl")
 
     log("[PIPELINE] exporting STL...")
     export_voxels_to_stl(hull, pitch, hull_stl_path)
@@ -232,16 +255,17 @@ def run_pipeline(
             prefix="carved",
         )
 
-        save_voxel_slices(hull, "outputs/debug/slices", "hull")
-        save_voxel_slices(carved, "outputs/debug/slices", "carved")
+        save_voxel_slices(hull, str(debug_dir / "slices"), "hull")
+        save_voxel_slices(carved, str(debug_dir / "slices"), "carved")
 
-        carved_stl_path = "outputs/meshes/shadow_carved.stl"
+        carved_stl_path = str(mesh_dir / "shadow_carved.stl")
         export_voxels_to_stl(carved, pitch, carved_stl_path)
         log(f"[PIPELINE] saved carved mesh: {carved_stl_path}")
 
     log(f"[PIPELINE] completed in {time.time() - t0:.2f} seconds")
 
     return {
+        "output_dir": str(output_dir),
         "hull_stl_path": hull_stl_path,
         "carved_stl_path": carved_stl_path,
         "hull_summaries": hull_summaries,
