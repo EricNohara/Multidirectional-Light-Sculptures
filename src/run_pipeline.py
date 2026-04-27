@@ -14,6 +14,8 @@ from postprocess_prune import fast_projection_prune
 from pathlib import Path
 from datetime import datetime
 import time
+import warnings
+warnings.filterwarnings("ignore", module="paramiko")
 
 # helper function to print out metrics per silhouette input view
 def print_view_metrics(name, summaries):
@@ -125,6 +127,7 @@ def run_pipeline(
     image_size_value=350,
     optimize_material=False,
     output_dir=None,
+    prune_passes=6,
     log=print,
 ):
     t0 = time.time()
@@ -154,35 +157,39 @@ def run_pipeline(
     for i, path in enumerate(view_paths):
         img = load_binary_image(path, size=image_size)
         images.append(img)
-        log(f"[PIPELINE] img{i} silhouette pixels: {img.sum()} of {img.size}")
 
     for i, img in enumerate(images):
         save_mask(img, str(debug_dir / "masks" / "base" / f"view{i}_mask.png"))
 
     sources = build_sources(images, world_size)
     original_sources = sources
-
-    for i, src in enumerate(sources):
-        log(f"[PIPELINE] shadow source {i}: direction={src.direction}, up={src.up}")
-
     voxel_centers = make_voxel_centers(nx, ny, nz, world_size)
 
-    log("[PIPELINE] optimizing silhouettes...")
-    optimized_sources = optimize_silhouettes(
-        sources,
-        voxel_centers,
-        iterations=6,
-        alpha=0.15,
-        sigma=4.0,
-        sample_per_view=300,
-        growth_radius=2,
-        verbose=True,
-    )
+    # optimize the input silhouettes if more than one inputted
+    if len(sources) > 1:
+        log("[PIPELINE] optimizing silhouettes...")
 
-    for i, src in enumerate(optimized_sources):
-        save_mask(src.image, str(debug_dir / "masks" / "opt" / f"view{i}_optimized_mask.png"))
+        optimized_sources = optimize_silhouettes(
+            sources,
+            voxel_centers,
+            iterations=6,
+            alpha=0.15,
+            sigma=4.0,
+            sample_per_view=300,
+            growth_radius=2,
+            verbose=True,
+        )
 
-    sources = optimized_sources
+        for i, src in enumerate(optimized_sources):
+            save_mask(
+                src.image,
+                str(debug_dir / "masks" / "opt" / f"view{i}_optimized_mask.png")
+            )
+
+        sources = optimized_sources
+    else:
+        log("[PIPELINE] skipping optimization (single view)")
+        optimized_sources = sources
 
     log("[PIPELINE] computing shadow hull...")
     hull = compute_shadow_hull(sources, voxel_centers)
@@ -196,7 +203,7 @@ def run_pipeline(
         voxel_centers,
         optimized_sources=optimized_sources,
         original_sources=original_sources,
-        max_passes=6,
+        max_passes=prune_passes,
         max_remove_fraction_per_pass=0.15,
         min_face_neighbors=2,
         redundancy_threshold=2.0,

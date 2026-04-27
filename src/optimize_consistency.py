@@ -1,5 +1,4 @@
 import numpy as np
-from tqdm import tqdm
 from scipy.ndimage import binary_erosion, binary_dilation, binary_closing
 
 from shadow_hull import compute_shadow_hull
@@ -177,18 +176,15 @@ def build_displacement_constraints(
             continue
 
         candidate_ids = np.arange(len(xs))
-        if len(candidate_ids) > sample_per_view:
-            candidate_ids = np.random.choice(candidate_ids, size=sample_per_view, replace=False)
 
-        iterator = candidate_ids
-        if verbose:
-            iterator = tqdm(
+        if len(candidate_ids) > sample_per_view:
+            candidate_ids = np.random.choice(
                 candidate_ids,
-                desc=f"[OPT] view {j} constraints",
-                unit="px"
+                size=sample_per_view,
+                replace=False,
             )
 
-        for t in iterator:
+        for count, t in enumerate(candidate_ids, start=1):
             px = int(xs[t])
             py = int(ys[t])
 
@@ -219,7 +215,7 @@ def build_displacement_constraints(
                 # discrete growth suggestion
                 add_maps[k][qy, qx] = True
 
-                # optional smooth boundary pull
+                # smooth boundary pull
                 b = nearest_boundary_point_from_list(boundary_pts_list[k], q)
                 if b is not None:
                     bx, by = int(b[0]), int(b[1])
@@ -257,9 +253,9 @@ def optimize_silhouettes(
     - detect missing pixels
     - infer target growth locations in the other silhouettes
     - combine:
-        * smooth warp from sparse displacement field
-        * discrete growth from add_maps
-        * fallback dilation when progress stalls or growth is too weak
+        - smooth warp from sparse displacement field
+        - discrete growth from add_maps
+        - fallback dilation when progress stalls or growth is too weak
     - keep best result and early stop on plateau
     """
     current_sources = list(sources)
@@ -273,7 +269,7 @@ def optimize_silhouettes(
 
     for it in range(iterations):
         if verbose:
-            print(f"\n[OPT] iteration {it+1}/{iterations}")
+            print(f"\n[OPTIMIZER] iteration {it+1}/{iterations}")
 
         dx_list, dy_list, add_maps, actuals, inconsistencies, stats = build_displacement_constraints(
             current_sources,
@@ -289,8 +285,8 @@ def optimize_silhouettes(
         worst_view = int(np.argmax(missing_per_view)) if len(missing_per_view) > 0 else 0
 
         if verbose:
-            print(f"[OPT] growth pixels per view: {growth_pixels_per_view}")
-            print(f"[OPT] iter {it+1}: missing={total_missing}, per_view={missing_per_view}")
+            print(f"[OPTIMIZER] growth pixels per view: {growth_pixels_per_view}")
+            print(f"[OPTIMIZER] iter {it+1}: missing={total_missing}, per_view={missing_per_view}")
 
         if total_missing < best_missing:
             best_missing = total_missing
@@ -301,7 +297,7 @@ def optimize_silhouettes(
 
         if total_missing == 0:
             if verbose:
-                print("[OPT] perfect consistency reached")
+                print("[OPTIMIZER] perfect consistency reached")
             break
 
         updated_sources = []
@@ -346,11 +342,10 @@ def optimize_silhouettes(
 
         if stall_count >= plateau_patience:
             if verbose:
-                print("[OPT] early stop: no improvement")
+                print("[OPTIMIZER] early stop: no improvement")
             break
 
-    # evaluate the final best silhouettes one last time if you want best-by-metric behavior
     if verbose:
-        print(f"[OPT] best total missing: {best_missing}")
+        print(f"[OPTIMIZER] best total missing: {best_missing}")
 
     return best_sources

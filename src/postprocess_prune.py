@@ -210,7 +210,6 @@ def fast_projection_prune(
     """
     Fast postprocess:
       - boundary-only
-      - no per-voxel global connectivity checks
       - bulk removal of projection-redundant voxels
       - optional largest-component cleanup after each pass
 
@@ -220,7 +219,7 @@ def fast_projection_prune(
 
     hull, num0, removed0 = _largest_component_only(hull)
     if verbose:
-        print(f"[POST-FAST] initial component cleanup: removed={removed0}, num_components={num0}")
+        print(f"[POSTPROCESS] initial component cleanup: removed={removed0}, num_components={num0}")
 
     total_bulk_removed = 0
     total_cc_removed = removed0
@@ -232,7 +231,7 @@ def fast_projection_prune(
         boundary = _make_boundary_mask(hull)
         if not boundary.any():
             if verbose:
-                print(f"[POST-FAST] pass {p+1}: no boundary voxels")
+                print(f"[POSTPROCESS] pass {p+1}: no boundary voxels")
             break
 
         proj_data = _rebuild_projection_data(hull, voxel_centers, optimized_sources)
@@ -273,7 +272,7 @@ def fast_projection_prune(
 
         if not scored:
             if verbose:
-                print(f"[POST-FAST] pass {p+1}: no removable candidates")
+                print(f"[POSTPROCESS] pass {p+1}: no removable candidates")
             break
 
         scored.sort(reverse=True, key=lambda t: t[0])
@@ -301,7 +300,7 @@ def fast_projection_prune(
 
         if verbose:
             print(
-                f"[POST-FAST] pass {p+1}: bulk_removed={removed_bulk}, "
+                f"[POSTPROCESS] pass {p+1}: bulk_removed={removed_bulk}, "
                 f"cc_removed={cc_removed}, final_voxels={after}, num_components={num_comp}"
             )
 
@@ -313,8 +312,8 @@ def fast_projection_prune(
     total_cc_removed += removedf
 
     if verbose:
-        print(f"[POST-FAST] final component cleanup: removed={removedf}, num_components={numf}")
-        print(f"[POST-FAST] final voxel count: {int(hull.sum())}")
+        print(f"[POSTPROCESS] final component cleanup: removed={removedf}, num_components={numf}")
+        print(f"[POSTPROCESS] final voxel count: {int(hull.sum())}")
 
     stats = {
         "bulk_removed": int(total_bulk_removed),
