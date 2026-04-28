@@ -1,7 +1,8 @@
+import os
 import numpy as np
 from scipy.ndimage import binary_erosion, binary_dilation, binary_closing
 
-from shadow_hull import compute_shadow_hull
+from shadow_hull import compute_raw_shadow_hull
 from render import render_shadow
 from projections import project_points_orthographic
 from warp import smooth_displacement, warp_mask
@@ -26,48 +27,55 @@ def nearest_boundary_point_from_list(boundary_pts: np.ndarray, target_xy):
     return boundary_pts[np.argmin(d2)]
 
 
-def precompute_source_projection_data(sources, voxel_centers):
+def _precompute_one_source_projection(src, pts):
+    px, py, valid, depth = project_points_orthographic(
+        pts,
+        src.direction,
+        src.up,
+        src.world_center,
+        src.world_size,
+        src.image.shape
+    )
+
+    pxi = np.round(px).astype(int)
+    pyi = np.round(py).astype(int)
+
+    ray_lookup = {}
+    valid_idxs = np.where(valid)[0]
+
+    for idx in valid_idxs:
+        key = (pxi[idx], pyi[idx])
+        if key not in ray_lookup:
+            ray_lookup[key] = []
+        ray_lookup[key].append(idx)
+
+    for key in ray_lookup:
+        arr = np.array(ray_lookup[key], dtype=int)
+        arr = arr[np.argsort(depth[arr])]
+        ray_lookup[key] = arr
+
+    return {
+        "px": pxi,
+        "py": pyi,
+        "valid": valid,
+        "depth": depth,
+        "ray_lookup": ray_lookup,
+    }
+
+
+def precompute_source_projection_data(sources, voxel_centers, num_workers=None):
     """
     Project all voxel centers into every source once and build a lookup:
       (pixel_x, pixel_y) -> voxel indices along that ray, sorted by depth.
+    Parallelized over sources.
     """
     pts = voxel_centers.reshape(-1, 3)
-    proj_data = []
 
-    for src in sources:
-        px, py, valid, depth = project_points_orthographic(
-            pts,
-            src.direction,
-            src.up,
-            src.world_center,
-            src.world_size,
-            src.image.shape
-        )
+    if num_workers is None:
+        num_workers = min(len(sources), max(1, os.cpu_count() or 1))
 
-        pxi = np.round(px).astype(int)
-        pyi = np.round(py).astype(int)
-
-        ray_lookup = {}
-        valid_idxs = np.where(valid)[0]
-
-        for idx in valid_idxs:
-            key = (pxi[idx], pyi[idx])
-            if key not in ray_lookup:
-                ray_lookup[key] = []
-            ray_lookup[key].append(idx)
-
-        for key in ray_lookup:
-            arr = np.array(ray_lookup[key], dtype=int)
-            arr = arr[np.argsort(depth[arr])]
-            ray_lookup[key] = arr
-
-        proj_data.append({
-            "px": pxi,
-            "py": pyi,
-            "valid": valid,
-            "depth": depth,
-            "ray_lookup": ray_lookup,
-        })
+    with ThreadPoolExecutor(max_workers=num_workers) as ex:
+        proj_data = list(ex.map(lambda src: _precompute_one_source_projection(src, pts), sources))
 
     return pts, proj_data
 
@@ -110,7 +118,6 @@ def find_least_cost_voxel_for_inconsistent_pixel_fast(
         return None
 
     if max_ray_samples is not None and len(idxs) > max_ray_samples:
-        # sample uniformly along the sorted depth list
         sample_ids = np.linspace(0, len(idxs) - 1, max_ray_samples).astype(int)
         idxs = idxs[sample_ids]
 
@@ -143,37 +150,58 @@ def project_point_to_image_fast(point_idx, src, pd):
     return np.array([x, y], dtype=int)
 
 
-def build_displacement_constraints(
+def _precompute_view_data(src, hull, voxel_centers):
+    actual = render_shadow(hull, voxel_centers, src)
+    inc = inconsistent_pixels(src.image, actual)
+    outside = outside_distance(src.image)
+    boundary = boundary_pixels(src.image)
+    return actual, inc, outside, boundary
+
+
+def _build_constraints_for_view(
+    j,
+    inc,
+    sample_per_view,
+    max_ray_samples,
     sources,
-    voxel_centers,
-    sample_per_view=300,
-    max_ray_samples=24,
-    verbose=True
+    outside_cost_maps,
+    boundary_pts_list,
+    proj_data,
+    verbose,
 ):
-    """
-    Returns:
-      dx_list, dy_list, add_maps, actuals, inconsistencies, stats
-    """
-    hull = compute_shadow_hull(sources, voxel_centers)
-    actuals = [render_shadow(hull, voxel_centers, s) for s in sources]
-    inconsistencies = [inconsistent_pixels(s.image, a) for s, a in zip(sources, actuals)]
-    outside_cost_maps = [outside_distance(s.image) for s in sources]
-    boundary_pts_list = [boundary_pixels(s.image) for s in sources]
+    local_dx_list = [np.zeros_like(s.image, dtype=float) for s in sources]
+    local_dy_list = [np.zeros_like(s.image, dtype=float) for s in sources]
+    local_add_maps = [np.zeros_like(s.image, dtype=bool) for s in sources]
 
-    dx_list = [np.zeros_like(s.image, dtype=float) for s in sources]
-    dy_list = [np.zeros_like(s.image, dtype=float) for s in sources]
-    add_maps = [np.zeros_like(s.image, dtype=bool) for s in sources]
+    ys, xs = np.where(inc)
 
-    _, proj_data = precompute_source_projection_data(sources, voxel_centers)
+    if len(xs) == 0:
+        return j, local_dx_list, local_dy_list, local_add_maps, 0
 
-    total_missing = 0
+    candidate_ids = np.arange(len(xs))
+    if len(candidate_ids) > sample_per_view:
+        candidate_ids = np.random.choice(candidate_ids, size=sample_per_view, replace=False)
 
-    for j, inc in enumerate(inconsistencies):
-        ys, xs = np.where(inc)
-        total_missing += len(xs)
+    iterator = candidate_ids
+    if verbose:
+        iterator = tqdm(
+            candidate_ids,
+            desc=f"[SILHOUETTE OPTIMIZER] view {j} constraints",
+            unit="px"
+        )
 
-        if len(xs) == 0:
-            continue
+    for t in iterator:
+        px = int(xs[t])
+        py = int(ys[t])
+
+        result = find_least_cost_voxel_for_inconsistent_pixel_fast(
+            source_index=j,
+            pixel_xy=(px, py),
+            sources=sources,
+            outside_cost_maps=outside_cost_maps,
+            proj_data=proj_data,
+            max_ray_samples=max_ray_samples,
+        )
 
         candidate_ids = np.arange(len(xs))
 
@@ -197,23 +225,49 @@ def build_displacement_constraints(
                 max_ray_samples=max_ray_samples,
             )
 
-            if result is None:
+            q = project_point_to_image_fast(point_idx, src, proj_data[k])
+            if q is None:
                 continue
 
-            point_idx, _ = result
+            qx, qy = int(q[0]), int(q[1])
 
-            for k, src in enumerate(sources):
-                if k == j:
-                    continue
+            local_add_maps[k][qy, qx] = True
 
-                q = project_point_to_image_fast(point_idx, src, proj_data[k])
-                if q is None:
-                    continue
+            b = nearest_boundary_point_from_list(boundary_pts_list[k], q)
+            if b is not None:
+                bx, by = int(b[0]), int(b[1])
+                local_dx_list[k][by, bx] += (qx - bx)
+                local_dy_list[k][by, bx] += (qy - by)
 
-                qx, qy = int(q[0]), int(q[1])
+    return j, local_dx_list, local_dy_list, local_add_maps, int(len(xs))
 
-                # discrete growth suggestion
-                add_maps[k][qy, qx] = True
+
+def build_displacement_constraints(
+    sources,
+    voxel_centers,
+    sample_per_view=300,
+    max_ray_samples=24,
+    verbose=True,
+    num_workers=None,
+):
+    """
+    Returns: dx_list, dy_list, add_maps, actuals, inconsistencies, stats
+
+    Parallelized over:
+    - source projection precompute
+    - per-view render/precompute
+    - per-view constraint construction
+    """
+    hull = compute_raw_shadow_hull(sources, voxel_centers)
+
+    if num_workers is None:
+        num_workers = min(len(sources), max(1, os.cpu_count() or 1))
+
+    with ThreadPoolExecutor(max_workers=num_workers) as ex:
+        precomputed = list(ex.map(
+            lambda src: _precompute_view_data(src, hull, voxel_centers),
+            sources
+        ))
 
                 # smooth boundary pull
                 b = nearest_boundary_point_from_list(boundary_pts_list[k], q)
@@ -229,6 +283,52 @@ def build_displacement_constraints(
     }
 
     return dx_list, dy_list, add_maps, actuals, inconsistencies, stats
+
+
+def _update_one_source(
+    idx,
+    src,
+    dx,
+    dy,
+    add_map,
+    alpha,
+    sigma,
+    growth_structure,
+    cleanup_structure,
+    fallback_structure,
+    worst_view,
+    growth_pixels_per_view,
+    fallback_growth_threshold,
+    fallback_global_dilation,
+    stall_count,
+):
+    dx_s, dy_s = smooth_displacement(dx, dy, sigma=sigma)
+
+    warped = warp_mask(
+        src.image,
+        dx=alpha * dx_s,
+        dy=alpha * dy_s
+    )
+
+    grown = binary_dilation(add_map, structure=growth_structure)
+
+    new_img = src.image | warped | grown
+
+    if idx == worst_view and growth_pixels_per_view[idx] < fallback_growth_threshold:
+        new_img = binary_dilation(new_img, structure=fallback_structure)
+
+    if fallback_global_dilation and stall_count >= 1 and idx == worst_view:
+        new_img = binary_dilation(new_img, structure=fallback_structure)
+
+    new_img = binary_closing(new_img, structure=cleanup_structure)
+
+    return type(src)(
+        image=new_img,
+        direction=src.direction,
+        up=src.up,
+        world_center=src.world_center,
+        world_size=src.world_size
+    )
 
 
 def optimize_silhouettes(
@@ -263,6 +363,9 @@ def optimize_silhouettes(
     best_missing = float("inf")
     stall_count = 0
 
+    if num_workers is None:
+        num_workers = min(len(sources), max(1, os.cpu_count() or 1))
+
     growth_structure = np.ones((2 * growth_radius + 1, 2 * growth_radius + 1), dtype=bool)
     cleanup_structure = np.ones((3, 3), dtype=bool)
     fallback_structure = np.ones((3, 3), dtype=bool)
@@ -276,7 +379,8 @@ def optimize_silhouettes(
             voxel_centers,
             sample_per_view=sample_per_view,
             max_ray_samples=max_ray_samples,
-            verbose=verbose
+            verbose=verbose,
+            num_workers=num_workers,
         )
 
         total_missing = stats["total_missing"]
@@ -300,43 +404,29 @@ def optimize_silhouettes(
                 print("[OPTIMIZER] perfect consistency reached")
             break
 
-        updated_sources = []
-
-        for idx, (src, dx, dy, add_map) in enumerate(zip(current_sources, dx_list, dy_list, add_maps)):
-            # smooth sparse displacement field
-            dx_s, dy_s = smooth_displacement(dx, dy, sigma=sigma)
-
-            # continuous warp
-            warped = warp_mask(
-                src.image,
-                dx=alpha * dx_s,
-                dy=alpha * dy_s
+        jobs = [
+            (
+                idx,
+                src,
+                dx,
+                dy,
+                add_map,
+                alpha,
+                sigma,
+                growth_structure,
+                cleanup_structure,
+                fallback_structure,
+                worst_view,
+                growth_pixels_per_view,
+                fallback_growth_threshold,
+                fallback_global_dilation,
+                stall_count,
             )
+            for idx, (src, dx, dy, add_map) in enumerate(zip(current_sources, dx_list, dy_list, add_maps))
+        ]
 
-            # discrete growth proposed by least-cost-voxel constraints
-            grown = binary_dilation(add_map, structure=growth_structure)
-
-            # combine old shape + warp + targeted growth
-            new_img = src.image | warped | grown
-
-            # fallback: if growth suggestions are too weak, help the worst-view silhouette expand a bit
-            if idx == worst_view and growth_pixels_per_view[idx] < fallback_growth_threshold:
-                new_img = binary_dilation(new_img, structure=fallback_structure)
-
-            # fallback on plateau: if stalled, allow a tiny additional dilation on the worst view
-            if fallback_global_dilation and stall_count >= 1 and idx == worst_view:
-                new_img = binary_dilation(new_img, structure=fallback_structure)
-
-            # cleanup
-            new_img = binary_closing(new_img, structure=cleanup_structure)
-
-            updated_sources.append(type(src)(
-                image=new_img,
-                direction=src.direction,
-                up=src.up,
-                world_center=src.world_center,
-                world_size=src.world_size
-            ))
+        with ThreadPoolExecutor(max_workers=num_workers) as ex:
+            updated_sources = list(ex.map(lambda args: _update_one_source(*args), jobs))
 
         current_sources = updated_sources
 

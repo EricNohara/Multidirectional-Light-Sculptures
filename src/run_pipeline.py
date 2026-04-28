@@ -1,10 +1,11 @@
 import argparse
 import numpy as np
+import time
 
 from image_io import load_binary_image, save_mask
 from voxel_ops import make_voxel_centers, voxel_pitch
 from shadow_hull import compute_shadow_hull
-from config import ShadowSource
+from shadow_source import build_sources
 from export_mesh import export_voxels_to_stl
 from carve import carve_hollow_shell_strict
 from simulate import simulate_and_save
@@ -17,10 +18,11 @@ import time
 import warnings
 warnings.filterwarnings("ignore", module="paramiko")
 
-# helper function to print out metrics per silhouette input view
 def print_view_metrics(name, summaries):
     print(f"\n{name}")
+    ious = []
     for i, m in enumerate(summaries):
+        ious.append(m["iou"])
         print(
             f"  view {i}: "
             f"IoU={m['iou']:.4f}, "
@@ -29,6 +31,24 @@ def print_view_metrics(name, summaries):
             f"missing={m['missing_pixels']}, "
             f"extra={m['extra_pixels']}"
         )
+    if len(ious) > 0:
+        print(f"  avg IoU = {float(np.mean(ious)):.4f}")
+        print(f"  min IoU = {float(np.min(ious)):.4f}")
+
+
+def parse_direction_string(s: str):
+    """
+    Example:
+      "1,0,0;0,0,1"
+    """
+    dirs = []
+    parts = s.strip().split(";")
+    for p in parts:
+        vals = [float(x) for x in p.split(",")]
+        if len(vals) != 3:
+            raise ValueError("Each direction must have 3 values.")
+        dirs.append(np.array(vals, dtype=float))
+    return dirs
 
 def make_run_output_dir(base_dir="outputs"):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -38,34 +58,41 @@ def make_run_output_dir(base_dir="outputs"):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Build a shadow hull from 1, 2, or 3 silhouette images."
+        description="Build a multi-view shadow sculpture from 2 or more silhouette images."
     )
 
     parser.add_argument(
         "views",
         nargs="+",
-        help="1 to 3 silhouette image paths"
+        help="2 or more silhouette image paths"
     )
 
     parser.add_argument(
         "--world-size",
         type=float,
-        default=1.0,
-        help="Physical size of the voxel world"
+        default=80.0,
+        help="Physical size of the voxel world in mm"
     )
 
     parser.add_argument(
         "--grid",
         type=int,
-        default=350,
+        default=160,
         help="Voxel resolution used for nx=ny=nz"
     )
 
     parser.add_argument(
         "--image-size",
         type=int,
-        default=350,
+        default=256,
         help="Square size used to resize input silhouettes"
+    )
+
+    parser.add_argument(
+        "--directions",
+        type=str,
+        default=None,
+        help='Semicolon-separated direction vectors, e.g. "1,0,0;0,0,1"'
     )
 
     parser.add_argument(
@@ -74,50 +101,47 @@ def parse_args():
         help="Enable hollow-shell carving"
     )
 
+    parser.add_argument(
+        "--threshold",
+        type=int,
+        default=128,
+        help="Binarization threshold for input image"
+    )
+
+    parser.add_argument(
+        "--close-iters",
+        type=int,
+        default=0,
+        help="Binary closing iterations for silhouette cleanup"
+    )
+
+    parser.add_argument(
+        "--open-iters",
+        type=int,
+        default=0,
+        help="Binary opening iterations for silhouette cleanup"
+    )
+
+    parser.add_argument(
+        "--dilate-iters",
+        type=int,
+        default=0,
+        help="Optional binary dilation iterations"
+    )
+
+    parser.add_argument(
+        "--opt-iters",
+        type=int,
+        default=4,
+        help="Silhouette optimization iterations"
+    )
+
     args = parser.parse_args()
 
-    if not (1 <= len(args.views) <= 3):
-        parser.error("You must provide between 1 and 3 silhouette image paths.")
+    if len(args.views) < 2:
+        parser.error("Please provide at least 2 silhouette images.")
 
     return args
-
-
-def build_sources(images, world_size):
-    """
-    Assign a default orthographic direction/up pair for up to 3 views.
-    View 0: +X
-    View 1: +Z
-    View 2: +Y
-    """
-    view_configs = [
-        {
-            "direction": np.array([1, 0, 0], dtype=float),
-            "up": np.array([0, 1, 0], dtype=float),
-        },
-        {
-            "direction": np.array([0, 0, 1], dtype=float),
-            "up": np.array([0, 1, 0], dtype=float),
-        },
-        {
-            "direction": np.array([0, 1, 0], dtype=float),
-            "up": np.array([0, 0, 1], dtype=float),
-        },
-    ]
-
-    sources = []
-    for i, img in enumerate(images):
-        cfg = view_configs[i]
-        sources.append(
-            ShadowSource(
-                image=img,
-                direction=cfg["direction"],
-                up=cfg["up"],
-                world_center=np.array([0, 0, 0], dtype=float),
-                world_size=world_size,
-            )
-        )
-
-    return sources
 
 
 def run_pipeline(
@@ -240,8 +264,8 @@ def run_pipeline(
             hull,
             voxel_centers,
             sources,
-            shell_thickness_voxels=3,
-            max_passes=1,
+            shell_thickness_voxels=2,
+            max_passes=4,
             random_seed=0,
             protect_endcaps=True,
             cleanup_components=True,

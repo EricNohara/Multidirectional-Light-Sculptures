@@ -69,7 +69,7 @@ def compute_protected_shell(original_voxels, shell_thickness_voxels=3, protect_e
 
             protected |= endcaps
 
-    return protected
+    return protected, dist_inside
 
 
 def remove_small_components(voxels, min_component_size=100):
@@ -89,12 +89,61 @@ def remove_small_components(voxels, min_component_size=100):
     return keep
 
 
+def compute_candidate_priority(
+    candidate_indices,
+    occupied_coords,
+    projections,
+    sources,
+    counts,
+    dist_inside,
+):
+    """
+    Higher score => more removable.
+    Prefer:
+    - deeper interior voxels
+    - voxels whose supported pixels have higher redundancy
+    """
+    scores = np.full(len(candidate_indices), -1e18, dtype=float)
+
+    for ii, idx in enumerate(candidate_indices):
+        x, y, z = occupied_coords[idx]
+
+        if dist_inside[x, y, z] <= 0:
+            continue
+
+        redundancy_sum = 0.0
+        valid_views = 0
+        removable = True
+
+        for proj, src, c in zip(projections, sources, counts):
+            if not proj["valid"][idx]:
+                removable = False
+                break
+
+            xpix = proj["px"][idx]
+            ypix = proj["py"][idx]
+
+            if src.image[ypix, xpix]:
+                support = c[ypix, xpix]
+                if support <= 1:
+                    removable = False
+                    break
+                redundancy_sum += float(support - 1)
+            valid_views += 1
+
+        if removable and valid_views > 0:
+            interior_bonus = float(dist_inside[x, y, z])
+            scores[ii] = 2.0 * interior_bonus + 1.0 * redundancy_sum
+
+    return scores
+
+
 def carve_hollow_shell_strict(
     voxels,
     voxel_centers,
     sources,
-    shell_thickness_voxels=3,
-    max_passes=10,
+    shell_thickness_voxels=2,
+    max_passes=4,
     random_seed=0,
     protect_endcaps=True,
     cleanup_components=True,
@@ -105,7 +154,7 @@ def carve_hollow_shell_strict(
     original = voxels.copy()
     carved = voxels.copy()
 
-    protected_shell = compute_protected_shell(
+    protected_shell, dist_inside = compute_protected_shell(
         original,
         shell_thickness_voxels=shell_thickness_voxels,
         protect_endcaps=protect_endcaps
@@ -149,14 +198,16 @@ def carve_hollow_shell_strict(
                 print(f"[HOLLOW] pass {p+1}: no hollowing candidates left")
             break
 
-        rng.shuffle(candidate_indices)
+        # tie-break slightly with random noise
+        scores = scores + 1e-6 * rng.standard_normal(len(scores))
+        order = np.argsort(-scores)
+        candidate_indices = candidate_indices[order]
 
         for idx in candidate_indices:
             if not active[idx]:
                 continue
 
             x, y, z = occupied_coords[idx]
-
             if protected_shell[x, y, z]:
                 continue
 
