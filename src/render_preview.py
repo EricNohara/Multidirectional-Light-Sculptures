@@ -163,7 +163,7 @@ window.addEventListener('resize', () => {{
 </body>
 </html>"""
 
-    html_path = output_path.replace(".png", ".html")
-    with open(html_path, "w") as f:
+    html_path = str(Path(output_path).with_suffix(".html"))
+    with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
     return html_path

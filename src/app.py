@@ -43,7 +43,7 @@ def show_stl_preview(stl_path, sim_dir=None, width=420):
     from render_preview import render_shadow_preview_threejs
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        preview_path = Path(tmpdir) / "shadow_preview"
+        preview_path = Path(tmpdir) / "shadow_preview.html"
         html_path = render_shadow_preview_threejs(
             stl_path=stl_path,
             output_path=str(preview_path),
