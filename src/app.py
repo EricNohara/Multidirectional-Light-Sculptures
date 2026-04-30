@@ -373,18 +373,13 @@ def show_results(result, optimize_material):
         else result["hull_stl_path"]
     )
 
-    sim_dir = Path(result["output_dir"]) / "sim"
 
     st.subheader("3. Preview")
 
     preview_col, info_col = st.columns([1.1, 1])
 
     with preview_col:
-        show_stl_preview(
-            final_stl_path,
-            sim_dir=sim_dir,
-            width=420,
-        )
+        show_stl_preview(final_stl_path)
 
     with info_col:
         st.markdown("### Result Stats")
