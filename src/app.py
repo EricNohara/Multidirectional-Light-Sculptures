@@ -10,7 +10,7 @@ import contextlib
 from PIL import Image
 import re
 from streamlit_searchbox import st_searchbox
-from streamlit_stl import stl_from_file
+from render_preview import render_shadow_preview
 
 
 CLOUD_SAFE_MAX_GRID = 160
@@ -38,21 +38,14 @@ class StreamlitLogCapture:
             self.buffer = ""
             
 def show_stl_preview(stl_path):
-    stl_from_file(
-        file_path=stl_path,          # Path to the STL file
-        color='#FF9900',                 # Color of the STL file (hexadecimal value)
-        material='material',             # Material of the STL file ('material', 'flat', or 'wireframe')
-        auto_rotate=True,                # Enable auto-rotation of the STL model
-        opacity=1,                       # Opacity of the STL model (0 to 1)
-        shininess=100,                   # How shiny the specular highlight is, when using the 'material' style.
-        cam_v_angle=60,                  # Vertical angle (in degrees) of the camera
-        cam_h_angle=-90,                 # Horizontal angle (in degrees) of the camera
-        cam_distance=None,               # Distance of the camera from the object (defaults to 3x bounding box size)
-        height=500,                      # Height of the viewer frame
-        max_view_distance=1000,          # Maximum viewing distance for the camera
-        key=None                         # Streamlit component key
-    )
-    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = str(Path(tmpdir) / "preview.png")
+        render_shadow_preview(
+            stl_path=stl_path,
+            output_path=output_path,
+            shadow_images=[],          # no decals needed here
+        )
+        st.image(output_path, use_container_width=True)
 
 def show_shadow_stats(hull_summaries):
     if not hull_summaries:
