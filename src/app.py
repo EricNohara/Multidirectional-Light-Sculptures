@@ -14,6 +14,12 @@ import re
 from streamlit_searchbox import st_searchbox
 
 
+CLOUD_SAFE_MAX_GRID = 160
+CLOUD_SAFE_DEFAULT_GRID = 120
+CLOUD_SAFE_DEFAULT_IMAGE_SIZE = 160
+MAX_VOXELS_PER_RUN = CLOUD_SAFE_MAX_GRID ** 3
+
+
 class StreamlitLogCapture:
     def __init__(self, log_func):
         self.log_func = log_func
@@ -490,18 +496,18 @@ with st.sidebar:
     grid = st.slider(
         "Voxel grid resolution",
         min_value=50,
-        max_value=500,
-        value=250,
-        step=25,
+        max_value=CLOUD_SAFE_MAX_GRID,
+        value=CLOUD_SAFE_DEFAULT_GRID,
+        step=10,
         help="Number of voxels used to represent the volume. Higher = more detail and accuracy, but slower runtime + more memory.",
     )
 
     image_size = st.slider(
         "Image size",
         min_value=50,
-        max_value=500,
-        value=250,
-        step=25,
+        max_value=256,
+        value=CLOUD_SAFE_DEFAULT_IMAGE_SIZE,
+        step=10,
         help="Resolution used when processing silhouette images. Higher = sharper projections but slower optimization.",
     )
 
@@ -561,6 +567,14 @@ run_clicked = st.button(
 if run_clicked:
     if not selected_images:
         st.error("Please select at least one silhouette image.")
+        st.stop()
+
+    estimated_voxels = grid ** 3
+    if estimated_voxels > MAX_VOXELS_PER_RUN:
+        st.error(
+            "This grid is too large for the hosted app. "
+            f"Try {CLOUD_SAFE_MAX_GRID} or lower."
+        )
         st.stop()
 
     log_box = st.empty()

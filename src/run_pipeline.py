@@ -147,8 +147,8 @@ def parse_args():
 def run_pipeline(
     view_paths,
     world_size=1.0,
-    grid=350,
-    image_size_value=350,
+    grid=120,
+    image_size_value=160,
     optimize_material=False,
     output_dir=None,
     prune_passes=6,

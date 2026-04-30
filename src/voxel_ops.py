@@ -7,13 +7,13 @@ def make_voxel_centers(nx, ny, nz, world_size):
     """
 
     # create the x, y, z positions for voxel centers
-    xs = np.linspace(-0.5, 0.5, nx, endpoint=False) + 0.5 / nx
-    ys = np.linspace(-0.5, 0.5, ny, endpoint=False) + 0.5 / ny
-    zs = np.linspace(-0.5, 0.5, nz, endpoint=False) + 0.5 / nz
+    xs = (np.linspace(-0.5, 0.5, nx, endpoint=False, dtype=np.float32) + 0.5 / nx).astype(np.float32)
+    ys = (np.linspace(-0.5, 0.5, ny, endpoint=False, dtype=np.float32) + 0.5 / ny).astype(np.float32)
+    zs = (np.linspace(-0.5, 0.5, nz, endpoint=False, dtype=np.float32) + 0.5 / nz).astype(np.float32)
 
     # create and return the 3D coordinate grid
     X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
-    pts = np.stack([X, Y, Z], axis=-1) * world_size
+    pts = (np.stack([X, Y, Z], axis=-1) * world_size).astype(np.float32)
     return pts  # [nx, ny, nz, 3]
 
 def voxel_pitch(world_size, nx, ny, nz):
