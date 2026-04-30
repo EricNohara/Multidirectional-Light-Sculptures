@@ -2,7 +2,7 @@ streamlit
 streamlit-searchbox
 numpy
 scipy
-trimesh
+trimesh>=4.0.0
 Pillow
 requests
 pyvista
