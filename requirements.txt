@@ -7,6 +7,3 @@ Pillow
 requests
 pyvista
 scikit-image
-libosmesa6
-libgl1-mesa-glx
-libegl1-mesa
