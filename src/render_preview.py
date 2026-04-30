@@ -3,6 +3,8 @@ import trimesh
 from PIL import Image
 from pathlib import Path
 import tempfile
+from trimesh.viewer import scene_to_html
+
 
 
 def normalize_mesh(mesh, target_size=1.6):
@@ -160,7 +162,7 @@ def render_shadow_preview(
             scene.add_geometry(plane)
 
     # Export HTML (WebGL)
-    html = scene.to_html()
+    html = scene_to_html(scene)
 
     html_path = output_path.replace(".png", ".html")
     with open(html_path, "w") as f:
