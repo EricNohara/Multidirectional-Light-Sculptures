@@ -8,5 +8,5 @@ requests
 pyvista
 scikit-image
 pathlib
-
+streamlit-stl
 
