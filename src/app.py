@@ -6,7 +6,6 @@ from io import BytesIO
 from pathlib import Path
 import streamlit as st
 from run_pipeline import run_pipeline
-from render_preview import render_shadow_preview
 from phylopic_api import PhyloPicClient, PhyloPicImage
 import numpy as np
 import contextlib
@@ -35,6 +34,8 @@ class StreamlitLogCapture:
 
 
 def show_stl_preview(stl_path, sim_dir=None, width=420):
+    from render_preview import render_shadow_preview
+
     preview_path = str(Path(stl_path).with_name("shadow_preview.png"))
     shadow_images = []
 

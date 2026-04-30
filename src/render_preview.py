@@ -1,14 +1,31 @@
 import os
 import argparse
 import tempfile
+import sys
 from pathlib import Path
+
+os.environ["PYVISTA_OFF_SCREEN"] = "true"
 
 import numpy as np
 from PIL import Image
 import pyvista as pv
 
 
-os.environ["PYVISTA_OFF_SCREEN"] = "true"
+_XVFB_STARTED = False
+
+
+def ensure_headless_display():
+    global _XVFB_STARTED
+
+    if _XVFB_STARTED or sys.platform != "linux":
+        return
+
+    try:
+        pv.start_xvfb(wait=0.5)
+    except Exception:
+        pass
+    finally:
+        _XVFB_STARTED = True
 
 
 def normalize_mesh(mesh: pv.PolyData, target_size: float = 1.6) -> pv.PolyData:
@@ -130,6 +147,8 @@ def render_shadow_preview(
 
     if shadow_images is None:
         shadow_images = []
+
+    ensure_headless_display()
 
     plotter = pv.Plotter(off_screen=True, window_size=window_size)
     plotter.set_background("#393939")
