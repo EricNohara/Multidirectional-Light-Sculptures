@@ -7,4 +7,3 @@ Pillow
 requests
 pyvista
 scikit-image
-libosmesa6

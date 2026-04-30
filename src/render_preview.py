@@ -3,21 +3,12 @@ import argparse
 import tempfile
 from pathlib import Path
 
-
+# Only keep this
 os.environ["PYVISTA_OFF_SCREEN"] = "true"
-os.environ["PYVISTA_USE_OSMESA"] = "true"
-os.environ["VTK_DEFAULT_RENDER_WINDOW_OFFSCREEN"] = "1"
-os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 
 import numpy as np
 from PIL import Image
 import pyvista as pv
-
-
-
-def ensure_headless_display():
-    # No-op for Streamlit Cloud
-    return
 
 
 def normalize_mesh(mesh: pv.PolyData, target_size: float = 1.6) -> pv.PolyData:
@@ -26,9 +17,11 @@ def normalize_mesh(mesh: pv.PolyData, target_size: float = 1.6) -> pv.PolyData:
     center = np.array(mesh.center)
     mesh.translate(-center, inplace=True)
 
-    max_dim = max(mesh.bounds[1] - mesh.bounds[0],
-                  mesh.bounds[3] - mesh.bounds[2],
-                  mesh.bounds[5] - mesh.bounds[4])
+    max_dim = max(
+        mesh.bounds[1] - mesh.bounds[0],
+        mesh.bounds[3] - mesh.bounds[2],
+        mesh.bounds[5] - mesh.bounds[4],
+    )
 
     if max_dim > 0:
         mesh.scale(target_size / max_dim, inplace=True)
@@ -68,6 +61,7 @@ def make_wall(center, u_vec, v_vec, width, height):
 
     return wall
 
+
 def add_wall_border(plotter, wall, color="#333333", line_width=0.035):
     edges = wall.extract_feature_edges(
         boundary_edges=True,
@@ -86,11 +80,6 @@ def add_wall_border(plotter, wall, color="#333333", line_width=0.035):
 
 
 def make_shadow_texture(mask_path: str, output_path: str, threshold: int = 245):
-    """
-    Converts a silhouette image into a transparent texture:
-    - white / bright pixels become black shadow
-    - dark / transparent pixels become transparent
-    """
     img = Image.open(mask_path).convert("RGBA")
     arr = np.array(img)
 
@@ -98,19 +87,15 @@ def make_shadow_texture(mask_path: str, output_path: str, threshold: int = 245):
     alpha = arr[:, :, 3]
 
     luminance = (
-        0.299 * rgb[:, :, 0] +
-        0.587 * rgb[:, :, 1] +
-        0.114 * rgb[:, :, 2]
+        0.299 * rgb[:, :, 0]
+        + 0.587 * rgb[:, :, 1]
+        + 0.114 * rgb[:, :, 2]
     )
 
     shadow_mask = (alpha > 0) & (luminance > threshold)
 
     out = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
-
-    # black shadow
     out[:, :, :3] = 0
-
-    # strong opacity
     out[:, :, 3] = shadow_mask.astype(np.uint8) * 255
 
     Image.fromarray(out).save(output_path)
@@ -122,25 +107,11 @@ def render_shadow_preview(
     shadow_images=None,
     window_size=(1200, 900),
 ):
-    """
-    stl_path:
-        Path to generated STL.
-
-    output_path:
-        Path where preview render should be saved.
-
-    shadow_images:
-        Optional list of 3 silhouette/mask images.
-        These are placed as fake shadow decals on the 3 walls.
-    """
-
     stl_path = str(stl_path)
     output_path = str(output_path)
 
     if shadow_images is None:
         shadow_images = []
-
-    ensure_headless_display()
 
     plotter = pv.Plotter(off_screen=True, window_size=window_size)
     plotter.set_background("#393939")
@@ -156,16 +127,11 @@ def render_shadow_preview(
     floor_z = -1.2
     wall_center_z = floor_z + wall_height / 2.0
 
-    # Put sculpture in the center of the room, floating vertically
-    target_center_x = 0.0
-    target_center_y = 0.0
-    target_center_z = wall_center_z
-
     mesh.translate(
         (
-            target_center_x - mesh.center[0],
-            target_center_y - mesh.center[1],
-            target_center_z - mesh.center[2],
+            -mesh.center[0],
+            -mesh.center[1],
+            wall_center_z - mesh.center[2],
         ),
         inplace=True,
     )
@@ -179,7 +145,6 @@ def render_shadow_preview(
     )
 
     walls = [
-        # input 1 -> left wall
         {
             "center": (-half, 0, wall_center_z),
             "u": (0, 1, 0),
@@ -188,8 +153,6 @@ def render_shadow_preview(
             "height": wall_height,
             "decal_center": (-half + eps, 0, wall_center_z),
         },
-
-        # input 2 -> back/right wall
         {
             "center": (0, half, wall_center_z),
             "u": (1, 0, 0),
@@ -198,8 +161,6 @@ def render_shadow_preview(
             "height": wall_height,
             "decal_center": (0, half - eps, wall_center_z),
         },
-
-        # input 3 -> floor
         {
             "center": (0, 0, floor_z),
             "u": (1, 0, 0),
@@ -210,7 +171,6 @@ def render_shadow_preview(
         },
     ]
 
-    # Add light gray walls/floor with visible borders
     for wall_cfg in walls:
         wall = make_wall(
             center=wall_cfg["center"],
@@ -230,7 +190,6 @@ def render_shadow_preview(
 
         add_wall_border(plotter, wall, color="#9D9D9D", line_width=0.015)
 
-    # Add shadow image decals
     with tempfile.TemporaryDirectory() as tmpdir:
         for i, mask_path in enumerate(shadow_images[:3]):
             if mask_path is None:
@@ -241,14 +200,12 @@ def render_shadow_preview(
 
             wall_cfg = walls[i]
 
-            shadow_scale = 0.3
-
             decal = make_wall(
                 center=wall_cfg["decal_center"],
                 u_vec=wall_cfg["u"],
                 v_vec=wall_cfg["v"],
-                width=wall_cfg["width"] * shadow_scale,
-                height=wall_cfg["height"] * shadow_scale,
+                width=wall_cfg["width"] * 0.3,
+                height=wall_cfg["height"] * 0.3,
             )
 
             texture = pv.read_texture(str(shadow_png))
@@ -260,7 +217,6 @@ def render_shadow_preview(
                 show_edges=False,
             )
 
-        # Simple scene lighting for the object itself
         plotter.add_light(pv.Light(position=(3, -4, 5), intensity=0.8))
         plotter.add_light(pv.Light(position=(-4, -3, 3), intensity=0.4))
 
@@ -271,13 +227,15 @@ def render_shadow_preview(
         ]
 
         plotter.camera.zoom(0.6)
-
         plotter.enable_anti_aliasing()
-        plotter.screenshot(output_path)
+
+        # WebGL export instead of screenshot
+        html_path = output_path.replace(".png", ".html")
+        plotter.export_html(html_path)
 
     plotter.close()
 
-    return output_path
+    return html_path
 
 
 if __name__ == "__main__":
