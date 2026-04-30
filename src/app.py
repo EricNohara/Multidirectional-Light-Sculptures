@@ -36,13 +36,16 @@ class StreamlitLogCapture:
             self.log_func(self.buffer.strip())
             self.buffer = ""
 
-
 def show_stl_preview(stl_path, sim_dir=None, width=420):
-    from render_preview import render_shadow_preview
+    from render_preview import render_shadow_preview_threejs
+    import streamlit.components.v1 as components
+    from pathlib import Path
+    import re
 
     preview_path = str(Path(stl_path).with_name("shadow_preview.png"))
-    shadow_images = []
 
+    # (Optional) keep shadow image logic for future use, but not needed for Three.js yet
+    shadow_images = []
     if sim_dir and Path(sim_dir).exists():
         sim_images = sorted(Path(sim_dir).glob("*.png"))
         view_map = {}
@@ -56,20 +59,18 @@ def show_stl_preview(stl_path, sim_dir=None, width=420):
 
         shadow_images = [view_map.get(i) for i in range(3)]
 
-        html_path = render_shadow_preview(
-            stl_path=stl_path,
-            output_path=preview_path,
-            shadow_images=[str(p) if p else None for p in shadow_images],
-        )
 
-        import streamlit.components.v1 as components
+    html_path = render_shadow_preview_threejs(
+        stl_path=stl_path,
+        output_path=preview_path,
+    )
 
-        with open(html_path, "r") as f:
-            html = f.read()
+    with open(html_path, "r") as f:
+        html = f.read()
 
-        components.html(html, height=600)
+    components.html(html, height=650)
 
-        return html_path
+    return html_path
 
 
 def show_shadow_stats(hull_summaries):
