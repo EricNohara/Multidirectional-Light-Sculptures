@@ -7,7 +7,6 @@ Pillow
 requests
 pyvista
 scikit-image
-pyvista[jupyter]
-trame
-trame-vtk
-trame-vuetify
+pathlib
+tempfile
+

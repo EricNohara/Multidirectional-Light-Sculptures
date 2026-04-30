@@ -1,85 +1,36 @@
-import os
-import argparse
-import tempfile
-from pathlib import Path
-
-# Only keep this
-os.environ["PYVISTA_OFF_SCREEN"] = "true"
-
 import numpy as np
+import trimesh
 from PIL import Image
-import pyvista as pv
+from pathlib import Path
+import tempfile
 
 
-def normalize_mesh(mesh: pv.PolyData, target_size: float = 1.6) -> pv.PolyData:
+def normalize_mesh(mesh, target_size=1.6):
     mesh = mesh.copy()
+    mesh.apply_translation(-mesh.centroid)
 
-    center = np.array(mesh.center)
-    mesh.translate(-center, inplace=True)
-
-    max_dim = max(
-        mesh.bounds[1] - mesh.bounds[0],
-        mesh.bounds[3] - mesh.bounds[2],
-        mesh.bounds[5] - mesh.bounds[4],
-    )
-
-    if max_dim > 0:
-        mesh.scale(target_size / max_dim, inplace=True)
+    scale = target_size / max(mesh.extents)
+    mesh.apply_scale(scale)
 
     return mesh
 
 
-def make_wall(center, u_vec, v_vec, width, height):
-    center = np.array(center, dtype=float)
-    u = np.array(u_vec, dtype=float)
-    v = np.array(v_vec, dtype=float)
-
-    u = u / np.linalg.norm(u)
-    v = v / np.linalg.norm(v)
+def create_wall(center, u_vec, v_vec, width, height):
+    u = np.array(u_vec) / np.linalg.norm(u_vec)
+    v = np.array(v_vec) / np.linalg.norm(v_vec)
 
     p0 = center - (width / 2) * u - (height / 2) * v
     p1 = center + (width / 2) * u - (height / 2) * v
     p2 = center + (width / 2) * u + (height / 2) * v
     p3 = center - (width / 2) * u + (height / 2) * v
 
-    points = np.array([p0, p1, p2, p3], dtype=float)
-    faces = np.array([4, 0, 1, 2, 3])
+    vertices = np.array([p0, p1, p2, p3])
+    faces = np.array([[0, 1, 2], [0, 2, 3]])
 
-    wall = pv.PolyData(points, faces)
-
-    tcoords = np.array(
-        [
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [1.0, 1.0],
-            [0.0, 1.0],
-        ],
-        dtype=float,
-    )
-
-    wall.active_texture_coordinates = tcoords
-
-    return wall
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
 
 
-def add_wall_border(plotter, wall, color="#333333", line_width=0.035):
-    edges = wall.extract_feature_edges(
-        boundary_edges=True,
-        feature_edges=False,
-        manifold_edges=False,
-        non_manifold_edges=False,
-    )
-
-    tubes = edges.tube(radius=line_width, n_sides=12)
-
-    plotter.add_mesh(
-        tubes,
-        color=color,
-        lighting=False,
-    )
-
-
-def make_shadow_texture(mask_path: str, output_path: str, threshold: int = 245):
+def make_shadow_texture(mask_path, threshold=245):
     img = Image.open(mask_path).convert("RGBA")
     arr = np.array(img)
 
@@ -98,161 +49,121 @@ def make_shadow_texture(mask_path: str, output_path: str, threshold: int = 245):
     out[:, :, :3] = 0
     out[:, :, 3] = shadow_mask.astype(np.uint8) * 255
 
-    Image.fromarray(out).save(output_path)
+    return Image.fromarray(out)
+
+
+def textured_plane(center, u_vec, v_vec, width, height, texture_img):
+    u = np.array(u_vec) / np.linalg.norm(u_vec)
+    v = np.array(v_vec) / np.linalg.norm(v_vec)
+
+    p0 = center - (width / 2) * u - (height / 2) * v
+    p1 = center + (width / 2) * u - (height / 2) * v
+    p2 = center + (width / 2) * u + (height / 2) * v
+    p3 = center - (width / 2) * u + (height / 2) * v
+
+    vertices = np.array([p0, p1, p2, p3])
+    faces = np.array([[0, 1, 2], [0, 2, 3]])
+
+    uv = np.array([
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1]
+    ])
+
+    material = trimesh.visual.texture.SimpleMaterial(image=texture_img)
+    visual = trimesh.visual.texture.TextureVisuals(uv=uv, image=texture_img)
+
+    return trimesh.Trimesh(
+        vertices=vertices,
+        faces=faces,
+        visual=visual,
+        process=False
+    )
 
 
 def render_shadow_preview(
-    stl_path: str,
-    output_path: str,
+    stl_path,
+    output_path,
     shadow_images=None,
-    window_size=(1200, 900),
 ):
-    stl_path = str(stl_path)
-    output_path = str(output_path)
-
     if shadow_images is None:
         shadow_images = []
 
-    plotter = pv.Plotter(off_screen=True, window_size=window_size)
-    plotter.set_background("#393939")
+    mesh = trimesh.load(stl_path)
+    mesh = normalize_mesh(mesh)
 
-    mesh = pv.read(stl_path)
-    mesh = normalize_mesh(mesh, target_size=1.6)
+    scene = trimesh.Scene()
+
+    # Add main mesh
+    mesh.visual.face_colors = [163, 163, 163, 255]
+    scene.add_geometry(mesh)
 
     room_size = 5.0
     wall_height = 5.0
-    half = room_size / 2.0
-    eps = 0.01
-
+    half = room_size / 2
     floor_z = -1.2
-    wall_center_z = floor_z + wall_height / 2.0
-
-    mesh.translate(
-        (
-            -mesh.center[0],
-            -mesh.center[1],
-            wall_center_z - mesh.center[2],
-        ),
-        inplace=True,
-    )
-
-    plotter.add_mesh(
-        mesh,
-        color="#a3a3a3",
-        smooth_shading=True,
-        specular=0.15,
-        diffuse=0.85,
-    )
+    wall_center_z = floor_z + wall_height / 2
+    eps = 0.01
 
     walls = [
         {
             "center": (-half, 0, wall_center_z),
             "u": (0, 1, 0),
             "v": (0, 0, 1),
-            "width": room_size,
-            "height": wall_height,
-            "decal_center": (-half + eps, 0, wall_center_z),
         },
         {
             "center": (0, half, wall_center_z),
             "u": (1, 0, 0),
             "v": (0, 0, 1),
-            "width": room_size,
-            "height": wall_height,
-            "decal_center": (0, half - eps, wall_center_z),
         },
         {
             "center": (0, 0, floor_z),
             "u": (1, 0, 0),
             "v": (0, 1, 0),
-            "width": room_size,
-            "height": room_size,
-            "decal_center": (0, 0, floor_z + eps),
         },
     ]
 
-    for wall_cfg in walls:
-        wall = make_wall(
-            center=wall_cfg["center"],
-            u_vec=wall_cfg["u"],
-            v_vec=wall_cfg["v"],
-            width=wall_cfg["width"],
-            height=wall_cfg["height"],
+    # Add walls
+    for w in walls:
+        wall = create_wall(
+            np.array(w["center"]),
+            w["u"],
+            w["v"],
+            room_size,
+            wall_height if w["v"] == (0, 0, 1) else room_size,
         )
+        wall.visual.face_colors = [216, 216, 216, 255]
+        scene.add_geometry(wall)
 
-        plotter.add_mesh(
-            wall,
-            color="#d8d8d8",
-            ambient=0.75,
-            diffuse=0.8,
-            show_edges=False,
-        )
-
-        add_wall_border(plotter, wall, color="#9D9D9D", line_width=0.015)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        for i, mask_path in enumerate(shadow_images[:3]):
-            if mask_path is None:
+    # Add shadow projections
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, img_path in enumerate(shadow_images[:3]):
+            if not img_path:
                 continue
 
-            shadow_png = Path(tmpdir) / f"shadow_{i}.png"
-            make_shadow_texture(mask_path, shadow_png)
+            shadow_img = make_shadow_texture(img_path)
 
-            wall_cfg = walls[i]
+            w = walls[i]
 
-            decal = make_wall(
-                center=wall_cfg["decal_center"],
-                u_vec=wall_cfg["u"],
-                v_vec=wall_cfg["v"],
-                width=wall_cfg["width"] * 0.3,
-                height=wall_cfg["height"] * 0.3,
+            center = np.array(w["center"]) + eps * np.array(w["u"])
+
+            plane = textured_plane(
+                center,
+                w["u"],
+                w["v"],
+                room_size * 0.3,
+                wall_height * 0.3 if i < 2 else room_size * 0.3,
+                shadow_img,
             )
 
-            texture = pv.read_texture(str(shadow_png))
+            scene.add_geometry(plane)
 
-            plotter.add_mesh(
-                decal,
-                texture=texture,
-                lighting=False,
-                show_edges=False,
-            )
+    # Export HTML (WebGL)
+    html = scene.to_html()
 
-        plotter.add_light(pv.Light(position=(3, -4, 5), intensity=0.8))
-        plotter.add_light(pv.Light(position=(-4, -3, 3), intensity=0.4))
-
-        plotter.camera_position = [
-            (6.5, -7.5, 5.0),
-            (0, 0, 0),
-            (0, 0, 1),
-        ]
-
-        plotter.camera.zoom(0.6)
-        plotter.enable_anti_aliasing()
-
-        # WebGL export instead of screenshot
-        html_path = output_path.replace(".png", ".html")
-        plotter.export_html(html_path)
-
-    plotter.close()
+    html_path = output_path.replace(".png", ".html")
+    with open(html_path, "w") as f:
+        f.write(html)
 
     return html_path
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--stl", required=True)
-    parser.add_argument("--out", required=True)
-    parser.add_argument("--shadow0", default=None)
-    parser.add_argument("--shadow1", default=None)
-    parser.add_argument("--shadow2", default=None)
-
-    args = parser.parse_args()
-
-    shadows = [args.shadow0, args.shadow1, args.shadow2]
-    shadows = [s for s in shadows if s is not None]
-
-    render_shadow_preview(
-        stl_path=args.stl,
-        output_path=args.out,
-        shadow_images=shadows,
-    )

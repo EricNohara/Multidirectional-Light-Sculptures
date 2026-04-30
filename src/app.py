@@ -1,6 +1,4 @@
 import os
-os.environ["PYVISTA_OFF_SCREEN"] = "true"
-
 import tempfile
 from io import BytesIO
 from pathlib import Path
@@ -58,14 +56,20 @@ def show_stl_preview(stl_path, sim_dir=None, width=420):
 
         shadow_images = [view_map.get(i) for i in range(3)]
 
-    render_shadow_preview(
-        stl_path=stl_path,
-        output_path=preview_path,
-        shadow_images=[str(p) if p else None for p in shadow_images],
-    )
+        html_path = render_shadow_preview(
+            stl_path=stl_path,
+            output_path=preview_path,
+            shadow_images=[str(p) if p else None for p in shadow_images],
+        )
 
-    st.image(preview_path, caption="Generated Shadow Preview", width=width)
-    return preview_path
+        import streamlit.components.v1 as components
+
+        with open(html_path, "r") as f:
+            html = f.read()
+
+        components.html(html, height=600)
+
+        return html_path
 
 
 def show_shadow_stats(hull_summaries):
