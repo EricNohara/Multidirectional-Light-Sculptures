@@ -8,10 +8,6 @@ requests
 pyvista
 scikit-image
 pathlib
-libgl1-mesa-glx
-libglu1-mesa
-xvfb
-libxrender1
-libxext6
- 
+
+
 

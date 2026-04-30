@@ -1,4 +1,7 @@
 import os
+os.environ["PYVISTA_OFF_SCREEN"] = "true"
+os.environ["DISPLAY"] = ""
+
 import tempfile
 from io import BytesIO
 from pathlib import Path
