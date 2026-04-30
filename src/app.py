@@ -37,33 +37,31 @@ class StreamlitLogCapture:
             self.buffer = ""
             
 def show_stl_preview(stl_path, sim_dir=None, width=420):
-    import re
     import streamlit as st
     import streamlit.components.v1 as components
     from pathlib import Path
     from render_preview import render_shadow_preview_threejs
 
-    preview_path = str(Path(stl_path).with_name("shadow_preview.png"))
-    html_path = render_shadow_preview_threejs(
-        stl_path=stl_path,
-        output_path=preview_path,
-    )
-
-    # Read and inline — but raise the height and explicitly allow scrolling=False
-    with open(html_path, "r") as f:
-        html = f.read()
-
-    # Streamlit components.html has an undocumented ~4MB limit on the html arg.
-    # If the embedded GLB pushes past that, serve via a file:// workaround instead.
-    MAX_INLINE_BYTES = 3_500_000
-    if len(html.encode()) > MAX_INLINE_BYTES:
-        st.warning(
-            f"Model is large ({len(html.encode())//1024} KB). "
-            "If the preview is blank, try reducing grid resolution."
+    with tempfile.TemporaryDirectory() as tmpdir:
+        preview_path = Path(tmpdir) / "shadow_preview.png"
+        html_path = render_shadow_preview_threejs(
+            stl_path=stl_path,
+            output_path=str(preview_path),
         )
 
-    components.html(html, height=650, scrolling=False)
-    return html_path
+        with open(html_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        MAX_INLINE_BYTES = 3_500_000
+        if len(html.encode("utf-8")) > MAX_INLINE_BYTES:
+            st.warning(
+                f"Model preview is large ({len(html.encode('utf-8'))//1024} KB). "
+                "Streamlit may fail to inline very large previews. "
+                "If this happens, reduce the grid resolution or simplify the model."
+            )
+
+        components.html(html, width=width, height=650, scrolling=False)
+        return None
 
 def show_shadow_stats(hull_summaries):
     if not hull_summaries:

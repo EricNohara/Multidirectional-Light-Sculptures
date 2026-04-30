@@ -10,7 +10,7 @@ def render_shadow_preview_threejs(stl_path, output_path):
     # Scale so the longest axis = 1.0. The box interior will also be 1.0 wide,
     # so the sculpture fills it nicely with a small margin.
     mesh.apply_translation(-mesh.centroid)
-    scale = 1.0 / max(mesh.extents)   # fits in [-0.5, 0.5]^3
+    scale = 1.0 / max(mesh.extents)
     mesh.apply_scale(scale)
 
     # Export to GLB (Three.js-friendly binary glTF)
@@ -19,7 +19,6 @@ def render_shadow_preview_threejs(stl_path, output_path):
     with open(glb_path, "rb") as f:
         glb_base64 = base64.b64encode(f.read()).decode()
 
-    # ── All JS braces are doubled so Python f-string leaves them intact ───────
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -47,48 +46,48 @@ def render_shadow_preview_threejs(stl_path, output_path):
 </head>
 <body>
   <div id="info">drag to rotate &nbsp;·&nbsp; scroll to zoom</div>
-  <div id="status" id="status"></div>
+  <div id="status"></div>
 
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js';
 import {{ OrbitControls }} from 'https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/controls/OrbitControls.js';
 import {{ GLTFLoader }} from 'https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/loaders/GLTFLoader.js';
 
-// ─── Scene ────────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0d0b10);
-// NO fog — fog was eating the geometry at short range
 
-// ─── Camera ───────────────────────────────────────────────────────────────────
-// Elevated 3/4 corner view matching the photo: front-right corner visible,
-// looking into the box so back-wall and left-wall shadows are both visible.
-const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.01, 50);
-camera.position.set(1.6, 1.4, 1.8);   // units match the ~1.0 world scale
+const aspect = window.innerWidth / window.innerHeight;
+const viewSize = 1.1;
+const camera = new THREE.OrthographicCamera(
+  -viewSize * aspect,
+   viewSize * aspect,
+   viewSize,
+  -viewSize,
+   0.01,
+   50
+);
+camera.position.set(1.45, 1.1, 1.35);
 camera.lookAt(0, 0, 0);
 
-// ─── Renderer ─────────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({{ antialias: true }});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.3;
+renderer.toneMappingExposure = 1.1;
 document.body.appendChild(renderer.domElement);
 
-// ─── OrbitControls ────────────────────────────────────────────────────────────
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0, 0);
-controls.minDistance = 1.0;
+controls.enablePan = true;
+controls.minDistance = 0.4;
 controls.maxDistance = 6.0;
-controls.maxPolarAngle = Math.PI * 0.54;  // don't go underground
+controls.maxPolarAngle = Math.PI * 0.75;
 controls.update();
 
-// ─── Box interior dimensions ──────────────────────────────────────────────────
-// Mesh is normalised to ~1.0 units.  Box is 1.4 units wide so there's margin.
-const S = 0.7;   // half-size of one box side  →  full box = 1.4 units
+const S = 0.75;
 
-// ─── Wall material — warm laser-cut MDF / kraft paper ─────────────────────────
 const wallMat = new THREE.MeshStandardMaterial({{
   color: 0xc4a06a,
   roughness: 0.88,
@@ -104,120 +103,105 @@ function addWall(w, h, px, py, pz, rx, ry) {{
   scene.add(mesh);
 }}
 
-// Floor  (y = -S, facing up)
-addWall(S*2, S*2,   0,  -S,   0,  -Math.PI/2, 0);
-// Back wall  (z = -S, facing +Z)
-addWall(S*2, S*2,   0,   0,  -S,   0,          0);
-// Left wall  (x = -S, facing +X)
-addWall(S*2, S*2,  -S,   0,   0,   0,          Math.PI/2);
+addWall(S * 2, S * 2,   0, -S,  0, -Math.PI / 2, 0);
+addWall(S * 2, S * 2,   0,  0, -S, 0, 0);
+addWall(S * 2, S * 2,  -S,  0,  0, 0, Math.PI / 2);
 
-// ─── Lighting ─────────────────────────────────────────────────────────────────
-
-// 1. Strong blue/violet point light near left wall — primary shadow caster
-//    (matches the coloured LED strip on the left in the photo)
-const blueLight = new THREE.PointLight(0x5566ff, 8.0, 4.0, 2);
-blueLight.position.set(-S + 0.08, 0.05, 0.1);  // just inside left wall
+const blueLight = new THREE.PointLight(0x5a6eff, 7.5, 4.5, 2);
+blueLight.position.set(-S + 0.08, 0.08, 0.12);
 blueLight.castShadow = true;
 blueLight.shadow.mapSize.set(2048, 2048);
 blueLight.shadow.camera.near = 0.02;
-blueLight.shadow.camera.far  = 4.0;
-blueLight.shadow.radius = 3;   // soft penumbra
+blueLight.shadow.camera.far  = 5.0;
+blueLight.shadow.radius = 3.5;
 scene.add(blueLight);
 
-// 2. Warm narrow spotlight from top-centre — creates the circular gobo on floor
-const topSpot = new THREE.SpotLight(0xffd580, 6.0);
-topSpot.position.set(0.0, S - 0.04, 0.0);  // just under ceiling
+const topSpot = new THREE.SpotLight(0xffd580, 6.0, 4.0, 0.36, 0.5, 1.8);
+topSpot.position.set(0.0, S - 0.05, -0.08);
 topSpot.target.position.set(0, -S, 0);
-topSpot.angle   = 0.36;
-topSpot.penumbra = 0.5;
-topSpot.decay   = 1.6;
 topSpot.castShadow = true;
 topSpot.shadow.mapSize.set(2048, 2048);
 topSpot.shadow.camera.near = 0.05;
-topSpot.shadow.camera.far  = 3.0;
+topSpot.shadow.camera.far  = 4.0;
+topSpot.shadow.radius = 2.5;
 scene.add(topSpot);
 scene.add(topSpot.target);
 
-// 3. Dim fill from slightly in front so we can see the sculpture face
-const fillLight = new THREE.DirectionalLight(0x334466, 0.5);
-fillLight.position.set(0.5, 0.3, 1.2);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.55);
+fillLight.position.set(0.85, 0.5, 1.05);
+fillLight.castShadow = true;
+fillLight.shadow.mapSize.set(2048, 2048);
+fillLight.shadow.camera.left = -1.0;
+fillLight.shadow.camera.right = 1.0;
+fillLight.shadow.camera.top = 1.0;
+fillLight.shadow.camera.bottom = -1.0;
+fillLight.shadow.camera.near = 0.2;
+fillLight.shadow.camera.far  = 5.0;
+fillLight.shadow.radius = 2.5;
 scene.add(fillLight);
 
-// 4. Ambient — neutral grey so nothing is pure black
-const ambient = new THREE.AmbientLight(0x303040, 2.5);
+const ambient = new THREE.AmbientLight(0x404050, 1.8);
 scene.add(ambient);
 
-// ─── Sculpture (GLB loaded from base64) ───────────────────────────────────────
 const loader = new GLTFLoader();
 const glbData = "data:model/gltf-binary;base64,{glb_base64}";
-
 const statusEl = document.getElementById('status');
 
 loader.load(
   glbData,
   (gltf) => {{
     const obj = gltf.scene;
-
-    // Re-centre: bake trimesh normalisation in case GLB root has an offset
     const bbox = new THREE.Box3().setFromObject(obj);
-    const ctr  = new THREE.Vector3();
+    const ctr = new THREE.Vector3();
     bbox.getCenter(ctr);
     const size = new THREE.Vector3();
     bbox.getSize(size);
     const maxExt = Math.max(size.x, size.y, size.z);
 
-    // Rescale so the longest axis = 1.0 (belt-and-suspenders in case trimesh
-    // exported a mesh that still has world-scale units in the GLB)
     if (maxExt > 0.001) {{
       obj.scale.setScalar(1.0 / maxExt);
     }}
 
-    // Re-centre after scaling
     const bbox2 = new THREE.Box3().setFromObject(obj);
-    const ctr2  = new THREE.Vector3();
+    const ctr2 = new THREE.Vector3();
     bbox2.getCenter(ctr2);
     obj.position.sub(ctr2);
-    obj.position.y += 0.05;   // hang very slightly above the mid-point
+    obj.position.y += 0.02;
 
     obj.traverse((child) => {{
       if (!child.isMesh) return;
-      child.castShadow    = true;
+      child.castShadow = true;
       child.receiveShadow = false;
-      // Blue-grey resin/plastic, matching the printed piece in the photo
       child.material = new THREE.MeshStandardMaterial({{
-        color:     0x3a5faa,
-        roughness: 0.4,
-        metalness: 0.12,
+        color: 0x3a5faa,
+        roughness: 0.38,
+        metalness: 0.08,
       }});
     }});
 
     scene.add(obj);
 
-    // ── Suspension wires ────────────────────────────────────────────────────
-    // Estimate the top of the object after recentering
     const bbox3 = new THREE.Box3().setFromObject(obj);
     const objTopY = bbox3.max.y + obj.position.y;
-    const ceilY   = S - 0.01;
+    const ceilY = S - 0.01;
 
     const wireMat = new THREE.LineBasicMaterial({{
-      color: 0xdddddd, opacity: 0.4, transparent: true
+      color: 0xdddddd,
+      opacity: 0.45,
+      transparent: true,
     }});
     const wireOffsets = [[-0.18,-0.18],[0.18,-0.18],[-0.18,0.18],[0.18,0.18]];
     wireOffsets.forEach(([wx, wz]) => {{
       const pts = [
-        new THREE.Vector3(wx * 0.7, objTopY,  wz * 0.7),
-        new THREE.Vector3(wx * 1.0, ceilY,    wz * 1.0),
+        new THREE.Vector3(wx * 0.7, objTopY, wz * 0.7),
+        new THREE.Vector3(wx * 1.0, ceilY, wz * 1.0),
       ];
       scene.add(new THREE.Line(
         new THREE.BufferGeometry().setFromPoints(pts), wireMat
       ));
     }});
   }},
-
-  // progress  (unused but required positional arg)
   undefined,
-
-  // error callback — show a visible message instead of silent black screen
   (err) => {{
     console.error('GLTFLoader error:', err);
     statusEl.textContent = 'Model load error — check console';
@@ -225,7 +209,6 @@ loader.load(
   }}
 );
 
-// ─── Animation loop ───────────────────────────────────────────────────────────
 function animate() {{
   requestAnimationFrame(animate);
   controls.update();
@@ -233,9 +216,12 @@ function animate() {{
 }}
 animate();
 
-// ─── Resize handler ───────────────────────────────────────────────────────────
 window.addEventListener('resize', () => {{
-  camera.aspect = window.innerWidth / window.innerHeight;
+  const aspect = window.innerWidth / window.innerHeight;
+  camera.left = -viewSize * aspect;
+  camera.right = viewSize * aspect;
+  camera.top = viewSize;
+  camera.bottom = -viewSize;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 }});
