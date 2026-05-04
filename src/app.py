@@ -16,9 +16,9 @@ from streamlit_searchbox import st_searchbox
 from render_preview import render_shadow_preview
 
 
-CLOUD_SAFE_MAX_GRID = 160
-CLOUD_SAFE_DEFAULT_GRID = 120
-CLOUD_SAFE_DEFAULT_IMAGE_SIZE = 160
+CLOUD_SAFE_MAX_GRID = 200
+CLOUD_SAFE_DEFAULT_GRID = 125
+CLOUD_SAFE_DEFAULT_IMAGE_SIZE = 125
 MAX_VOXELS_PER_RUN = CLOUD_SAFE_MAX_GRID ** 3
 
 
@@ -246,37 +246,40 @@ def add_phylopic_selection(image):
     except Exception as e:
         st.error(f"Could not download {image.title} from PhyloPic: {e}")
 
-
 def render_phylopic_result_picker(results, image_size):
     current_count = len(get_phylopic_selected_silhouettes())
-    cols = st.columns(3, gap="small")
-
-    for index, image in enumerate(results):
-        with cols[index % 3]:
-            try:
-                preview = preview_phylopic_result(image, image_size)
-            except Exception:
-                preview = image.preview_url
-            st.image(preview, caption=image.title, width=image_size)
-            already_selected = has_phylopic_selection(image.uuid)
-            disabled = already_selected or current_count >= 3
-            if st.button(
-                "Added" if already_selected else "Add silhouette",
-                key=f"phylopic_add_{image.uuid}",
-                disabled=disabled,
-                type="secondary",
-                use_container_width=True,
-            ):
-                add_phylopic_selection(image)
-                st.rerun()
-
-            if image.contributor:
-                st.caption(f"Contributor: {image.contributor}")
-            if image.license_url:
-                st.caption(f"[License]({image.license_url})")
 
     if current_count >= 3:
-        st.caption("Remove a selected silhouette to add another.")
+        st.caption("You already selected 3 silhouettes. Remove one to add another.")
+        return
+
+    st.markdown("#### Choose a silhouette")
+
+    with st.container(height=500):
+        for image in results:
+            if has_phylopic_selection(image.uuid):
+                continue
+
+            col_img, col_info, col_btn = st.columns([1, 4, 1])
+
+            with col_img:
+                try:
+                    preview = preview_phylopic_result(image, 70)
+                except Exception:
+                    preview = image.preview_url
+                st.image(preview, width=70)
+
+            with col_info:
+                st.markdown(f"**{image.title}**")
+                if image.contributor:
+                    st.caption(f"Contributor: {image.contributor}")
+
+            with col_btn:
+                if st.button("Add", key=f"phylopic_add_{image.uuid}"):
+                    add_phylopic_selection(image)
+                    st.rerun()
+
+            st.divider()
 
 
 def render_phylopic_selection_tray(image_size):
@@ -301,7 +304,7 @@ def render_phylopic_selection_tray(image_size):
             if st.button(
                 "Remove",
                 key=f"phylopic_remove_{details.get('uuid', selection['name'])}",
-                use_container_width=True,
+                width="stretch",
             ):
                 remove_phylopic_selection(details.get("uuid"))
                 st.rerun()
@@ -478,16 +481,16 @@ with st.sidebar:
         min_value=50,
         max_value=CLOUD_SAFE_MAX_GRID,
         value=CLOUD_SAFE_DEFAULT_GRID,
-        step=10,
+        step=5,
         help="Number of voxels used to represent the volume. Higher = more detail and accuracy, but slower runtime + more memory.",
     )
 
     image_size = st.slider(
         "Image size",
         min_value=50,
-        max_value=256,
+        max_value=CLOUD_SAFE_MAX_GRID,
         value=CLOUD_SAFE_DEFAULT_IMAGE_SIZE,
-        step=10,
+        step=5,
         help="Resolution used when processing silhouette images. Higher = sharper projections but slower optimization.",
     )
 

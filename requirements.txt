@@ -1,13 +1,11 @@
 streamlit
 streamlit-searchbox
-numpy
+numpy<2
 scipy
 trimesh>=4.0.0
 Pillow
 requests
 pyvista
 scikit-image
-pathlib
-
-
-
+pyarrow
+pandas

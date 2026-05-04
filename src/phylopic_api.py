@@ -59,7 +59,7 @@ class PhyloPicClient:
     def suggest_names(self, query: str, limit: int = 8) -> list[str]:
 
         query = query.strip()
-        print(len(query))
+
         if not query or self.extract_uuid(query) or len(query) <= 1:
             return []
 
