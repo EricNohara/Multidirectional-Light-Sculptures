@@ -27,10 +27,7 @@ def nearest_boundary_point_from_list(boundary_pts: np.ndarray, target_xy):
 
 
 def precompute_source_projection_data(sources, voxel_centers):
-    """
-    Project all voxel centers into every source once and build a lookup:
-      (pixel_x, pixel_y) -> voxel indices along that ray, sorted by depth.
-    """
+    # Project all voxel centers into every source once to build a lookup table
     pts = voxel_centers.reshape(-1, 3)
     proj_data = []
 
@@ -99,10 +96,7 @@ def find_least_cost_voxel_for_inconsistent_pixel_fast(
     proj_data,
     max_ray_samples=None,
 ):
-    """
-    For a missing pixel in source_index, find the least-cost voxel along that backprojected ray.
-    max_ray_samples can be used to cap per-ray cost.
-    """
+    # For a missing pixel in source_index, find the least-cost voxel along that backprojected ray.
     pd = proj_data[source_index]
     idxs = pd["ray_lookup"].get(pixel_xy, None)
 
@@ -148,12 +142,7 @@ def build_displacement_constraints(
     voxel_centers,
     sample_per_view=300,
     max_ray_samples=24,
-    verbose=True
 ):
-    """
-    Returns:
-      dx_list, dy_list, add_maps, actuals, inconsistencies, stats
-    """
     hull = compute_shadow_hull(sources, voxel_centers)
     actuals = [render_shadow(hull, voxel_centers, s) for s in sources]
     inconsistencies = [inconsistent_pixels(s.image, a) for s, a in zip(sources, actuals)]
@@ -246,9 +235,7 @@ def optimize_silhouettes(
     verbose=True
 ):
     """
-    Iteratively deform silhouettes to reduce inconsistency.
-
-    Strategy:
+    Iteratively deform silhouettes to reduce inconsistency:
     - build hull from current silhouettes
     - detect missing pixels
     - infer target growth locations in the other silhouettes
@@ -256,7 +243,7 @@ def optimize_silhouettes(
         - smooth warp from sparse displacement field
         - discrete growth from add_maps
         - fallback dilation when progress stalls or growth is too weak
-    - keep best result and early stop on plateau
+    - keep best result
     """
     current_sources = list(sources)
     best_sources = list(sources)
@@ -276,7 +263,6 @@ def optimize_silhouettes(
             voxel_centers,
             sample_per_view=sample_per_view,
             max_ray_samples=max_ray_samples,
-            verbose=verbose
         )
 
         total_missing = stats["total_missing"]
@@ -316,7 +302,7 @@ def optimize_silhouettes(
             # discrete growth proposed by least-cost-voxel constraints
             grown = binary_dilation(add_map, structure=growth_structure)
 
-            # combine old shape + warp + targeted growth
+            # combine deformations
             new_img = src.image | warped | grown
 
             # fallback: if growth suggestions are too weak, help the worst-view silhouette expand a bit
@@ -327,7 +313,6 @@ def optimize_silhouettes(
             if fallback_global_dilation and stall_count >= 1 and idx == worst_view:
                 new_img = binary_dilation(new_img, structure=fallback_structure)
 
-            # cleanup
             new_img = binary_closing(new_img, structure=cleanup_structure)
 
             updated_sources.append(type(src)(

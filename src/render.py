@@ -2,9 +2,7 @@ import numpy as np
 from projections import project_points_orthographic
 
 def render_shadow(voxels, voxel_centers, src):
-    """
-    Render binary orthographic shadow: pixel is True if any occupied voxel projects to it.
-    """
+    # pixel is True if any occupied voxel projects to it
     pts = voxel_centers[voxels].reshape(-1, 3)
     H, W = src.image.shape
     out = np.zeros((H, W), dtype=bool)

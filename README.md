@@ -1,6 +1,6 @@
 # Multidirectional Light Sculptures
 
-## Eric Nohara-LeClair, Yingtong (Sophie) Shen, Josh
+## Eric Nohara-LeClair, Yingtong (Sophie) Shen, Josh Ilano
 
 The multidirectional light sculpture generation pipeline takes as input one to three reference silhouette images and generates a single component 3D printable voxel sculpture who's orthographic shadows match the inputs'. The pipeline creates the initial shadow hull, optimizes the input silhouettes to reduce inconsistencies among the input silhouettes, prunes redundant voxels, then hollows out the interior of the sculpture to reduce the materials used to print it.
 
@@ -140,6 +140,12 @@ This project also includes an interactive Streamlit interface for generating scu
 ```bash
 streamlit run src/app.py
 ```
+
+### Hosted app
+
+Alternatively, we have hosted the streamlit app. To access, click on this link:
+
+[Click to view hosted app](https://multidirectional-light-sculptures.streamlit.app/)
 
 ## Pipeline Stages
 

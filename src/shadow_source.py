@@ -35,11 +35,7 @@ def _safe_up(direction, preferred_up=None):
     raise ValueError("Could not find a valid up vector")
 
 def build_sources(images, world_size, directions=None, ups=None):
-    """
-    Build one ShadowSource per image.
-    directions: list of 3-vectors, one per image
-    ups: optional list of 3-vectors, one per image
-    """
+    # Build one ShadowSource per image
     default_directions = [
         np.array([1, 0, 0], dtype=float),
         np.array([0, 0, 1], dtype=float),

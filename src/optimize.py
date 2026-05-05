@@ -5,10 +5,6 @@ def inconsistent_pixels(desired, actual):
     return desired & (~actual)
 
 def get_ray_voxel_indices_for_pixel(src, voxel_centers, pixel_xy):
-    """
-    Returns indices of voxels whose orthographic projection lands on the given pixel.
-    Brute force first version.
-    """
     nx, ny, nz, _ = voxel_centers.shape
     pts = voxel_centers.reshape(-1, 3)
 
@@ -24,7 +20,6 @@ def get_ray_voxel_indices_for_pixel(src, voxel_centers, pixel_xy):
     hit = valid & (pxi == xpix) & (pyi == ypix)
     idx = np.where(hit)[0]
 
-    # sort along ray direction if useful
     idx = idx[np.argsort(depth[idx])]
     return idx
 
@@ -34,10 +29,7 @@ def candidate_voxel_cost(
     sources,
     outside_cost_maps
 ):
-    """
-    Cost of forcing this voxel active:
-    sum of outside distances in all OTHER images
-    """
+    # cost = sum of outside distances in all OTHER images
     total = 0.0
     for k, src in enumerate(sources):
         if k == source_index:

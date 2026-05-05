@@ -6,10 +6,7 @@ from projections import project_points_orthographic
 
 
 def compute_raw_shadow_hull(sources, voxel_centers):
-    """
-    Standard voxel shadow hull:
-    keep a voxel only if it projects inside EVERY silhouette.
-    """
+    #     keep a voxel only if it projects inside EVERY silhouette.
     nx, ny, nz, _ = voxel_centers.shape
     pts = voxel_centers.reshape(-1, 3)
 
@@ -37,10 +34,7 @@ def compute_raw_shadow_hull(sources, voxel_centers):
 
 
 def connected_components_3d(mask):
-    """
-    6-connected components in 3D:
-    only face-adjacent neighbors in +/-x, +/-y, +/-z.
-    """
+    # 6-connected components in 3D:
     structure = np.zeros((3, 3, 3), dtype=bool)
     structure[1, 1, 1] = True
 
@@ -56,9 +50,7 @@ def connected_components_3d(mask):
 
 
 def line3d_voxels(p0, p1):
-    """
-    Straight voxel line between two 3D integer points.
-    """
+    # Straight voxel line between two 3D integer points.
     p0 = np.asarray(p0, dtype=float)
     p1 = np.asarray(p1, dtype=float)
 
@@ -76,13 +68,6 @@ def line3d_voxels(p0, p1):
 
 
 def connect_all_components_fast(hull, min_component_size=1, verbose=False):
-    """
-    Faster version:
-    - label once
-    - find largest component
-    - connect every other sufficiently large component directly to it
-    - use KD-tree instead of brute-force closest pair
-    """
     hull = hull.copy()
 
     labels, num = connected_components_3d(hull)
@@ -147,12 +132,6 @@ def compute_shadow_hull(
     min_component_size=1,
     verbose=False,
 ):
-    """
-    Fast final hull:
-    1. build raw shadow hull
-    2. if disconnected, connect floating components to the largest component
-       using simple straight voxel bridges
-    """
     hull = compute_raw_shadow_hull(sources, voxel_centers)
 
     if not enforce_connectivity or not np.any(hull):

@@ -147,12 +147,6 @@ def _rebuild_projection_data(hull, voxel_centers, sources):
 
 
 def _support_stats_for_voxel(occ_i, proj_data, optimized_sources, original_sources=None):
-    """
-    Returns a tuple:
-      breaks_optimized_required: bool
-      redundancy_score: float
-      original_penalty: float
-    """
     redundancy = 0.0
     original_penalty = 0.0
 
@@ -208,12 +202,9 @@ def fast_projection_prune(
     verbose=True,
 ):
     """
-    Fast postprocess:
-      - boundary-only
-      - bulk removal of projection-redundant voxels
-      - optional largest-component cleanup after each pass
-
-    This is designed to be much faster than exact connected pruning.
+    - boundary-only
+    - bulk removal of projection-redundant voxels
+    - largest-component cleanup after each pass
     """
     hull = hull.astype(bool).copy()
 
@@ -307,7 +298,7 @@ def fast_projection_prune(
         if removed_bulk == 0 and cc_removed == 0:
             break
 
-    # final guarantee: keep only largest connected component
+    # keep only largest connected component
     hull, numf, removedf = _largest_component_only(hull)
     total_cc_removed += removedf
 

@@ -1,10 +1,7 @@
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 
-# Helper functions to compute Euclidean distance fields of a binary silhouette to measure how far pixels lie 
-# inside or outside the shape, enabling soft projection constraints, thickness estimation, 
-# and more stable voxel carving / reconstruction.
-
+# Distance fields for binary silhouettes.
 def silhouette_distance_fields(mask: np.ndarray):
     """
     Function which computes the distance to background for foreground pixels and
@@ -15,13 +12,9 @@ def silhouette_distance_fields(mask: np.ndarray):
     return dist_inside, dist_outside
 
 def outside_distance(mask: np.ndarray) -> np.ndarray:
-    """
-    Functino that returns 0 if inside mask, positive outside by distance to nearest foreground pixel.
-    """
+    # 0 inside mask, positive outside.
     return distance_transform_edt(~mask) * (~mask)
 
 def inside_distance(mask: np.ndarray) -> np.ndarray:
-    """
-    Functino that returns positive if inside mask by distance to nearest background pixel.
-    """
+    # Positive distance inside mask.
     return distance_transform_edt(mask) * mask

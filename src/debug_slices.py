@@ -3,7 +3,6 @@ import numpy as np
 from PIL import Image
 
 # Helper functions for saving slices of the mesh to debug the hollowing functionality of the pipeline
-
 def save_slice_image(slice2d: np.ndarray, path: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     img = Image.fromarray((slice2d.astype(np.uint8) * 255))

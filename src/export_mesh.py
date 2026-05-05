@@ -3,9 +3,7 @@ import numpy as np
 import trimesh
 
 def export_voxels_to_stl(voxels: np.ndarray, pitch: float, out_path: str):
-    """
-    Convert boolean voxel grid to triangle mesh with marching cubes and export STL.
-    """
+    # Convert boolean voxel grid to triangle mesh with marching cubes and export STL.
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     if voxels.sum() == 0:

@@ -46,7 +46,7 @@ def show_stl_preview(stl_path):
         render_shadow_preview(
             stl_path=stl_path,
             output_path=output_path,
-            shadow_images=[],          # no decals needed here
+            shadow_images=[],
         )
         st.image(output_path, use_container_width=True)
 

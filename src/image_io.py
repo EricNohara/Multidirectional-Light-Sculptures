@@ -14,11 +14,7 @@ def load_binary_image(
     dilate_iters=0,
     fill_holes=False,
 ):
-    """
-    Load image -> binary silhouette mask.
-    Dark pixels become True by default.
-    """
-
+    # image to binary conversion - dark pixels are True
     img = Image.open(path).convert("RGBA").resize(size)
 
     white = Image.new("RGBA", img.size, (255, 255, 255, 255))

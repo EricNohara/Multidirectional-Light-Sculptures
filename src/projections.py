@@ -1,6 +1,6 @@
 import numpy as np
 
-# helper function to normalize a vector to have length 1
+# helper function to normalize a vector
 def normalize(v):
     v = np.asarray(v, dtype=float)
     n = np.linalg.norm(v)
@@ -9,11 +9,6 @@ def normalize(v):
     return v / n
 
 def project_points_orthographic(points, direction, up, world_center, world_size, image_shape):
-    """
-    This function projects every voxel center onto a silhouette image by transforming the sculpture
-    into a camera coordinate system aligned with the light direction and mapping world coordinates 
-    into pixel coordinates using orthographic projection.
-    """
     H, W = image_shape
 
     # create vectors for each camera axis

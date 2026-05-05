@@ -8,9 +8,7 @@ import pyvista as pv
 import streamlit as st
  
 os.environ["PYVISTA_OFF_SCREEN"] = "true"
- 
-# ── helpers ──────────────────────────────────────────────────────────────────
- 
+  
 def normalize_mesh(mesh: pv.PolyData, target_size: float = 1.6) -> pv.PolyData:
     mesh = mesh.copy()
     center = np.array(mesh.center)
@@ -70,12 +68,11 @@ def make_shadow_texture(mask_path: str, output_path: str, threshold: int = 128):
     shadow_mask = luminance < threshold
 
     out = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
-    out[:, :, 3] = shadow_mask.astype(np.uint8) * 200  # semi-transparent shadow
+    out[:, :, 3] = shadow_mask.astype(np.uint8) * 200  
 
     Image.fromarray(out).save(output_path)
 
 def render_orthographic_silhouette(mesh: pv.PolyData, direction: str, image_size=(512, 512)) -> str:
-    # Use a fresh normalized copy at origin — before room placement
     m = normalize_mesh(mesh.copy(), target_size=1.6)
 
     p = pv.Plotter(off_screen=True, window_size=image_size)
@@ -85,13 +82,10 @@ def render_orthographic_silhouette(mesh: pv.PolyData, direction: str, image_size
     p.camera.parallel_scale = 1.1
 
     if direction == "left":
-        # Looking from -X toward +X (left wall receives this shadow)
         p.camera_position = [(-10, 0, 0), (0, 0, 0), (0, 0, 1)]
     elif direction == "back":
-        # Looking from +Y toward -Y (back wall receives this shadow)
         p.camera_position = [(0, 10, 0), (0, 0, 0), (0, 0, 1)]
     elif direction == "top":
-        # Looking from +Z toward -Z (floor receives this shadow)
         p.camera_position = [(0, 0, 10), (0, 0, 0), (0, 1, 0)]
 
     p.enable_anti_aliasing()
@@ -101,6 +95,7 @@ def render_orthographic_silhouette(mesh: pv.PolyData, direction: str, image_size
     p.close()
     return tmp_path
 
+# renders preview of the sculpture and its shadows
 def render_shadow_preview(
     stl_path: str,
     output_path: str,
@@ -147,13 +142,11 @@ def render_shadow_preview(
         },
     ]
 
-    # Generate silhouettes from origin-centered mesh BEFORE room translation
     generated_shadows = []
     for wall_cfg in walls:
         tmp_silhouette = render_orthographic_silhouette(mesh, wall_cfg["direction"])
         generated_shadows.append(tmp_silhouette)
 
-    # NOW translate mesh into room position
     mesh.translate(
         (-mesh.center[0], -mesh.center[1], wall_center_z - mesh.center[2]),
         inplace=True,
